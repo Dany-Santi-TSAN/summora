@@ -13,29 +13,18 @@ import librosa
 import matplotlib.pyplot as plt
 import librosa.display
 
-from utils import validate_audio_path, format_duration
+from .utils import validate_audio_path, format_duration
 
 logger = logging.getLogger(__name__)
 
-"""
-Evaluation de la qualité audio
-
-
-
-validate_audio_path est utilisée pour valider le chemin du fichier audio et s'assurer qu'il est accessible
-
-_calculate_meeting_quality_score calcule un score de qualité pour chaque réunion :
-retourne :
- - un grade
- - recommandations pour améliorer la qualité des futures réunions.
- Cela aide les organisateurs à identifier les points forts et les points faibles de leurs réunions.
-
-"""
+# === Configuration de l'analyseur audio spécifique au réunion ===
 
 @dataclass
 class MeetingAudioConfig:
     """
-    Configuration pour l'analyse audio de meetings.
+    Configuration pour l’analyse des réunions audio.
+    Adapté aux besoins spécifiques des échanges humains en contexte professionnel.
+
     """
     frame_length: int = 2048
     hop_length: int = 512
@@ -51,8 +40,8 @@ class MeetingAudioConfig:
 
 class MeetingAudioAnalyzer:
     """
-    Analyseur audio spécialisé pour les meetings.
-    Focus sur les métriques pertinentes pour l'analyse de réunions.
+    Analyseur dédié aux fichiers audio de réunions professionnelles.
+    Fournit des métriques utiles et des recommandations pratiques.
     """
 
     def __init__(self, config: Optional[MeetingAudioConfig] = None):
@@ -63,6 +52,8 @@ class MeetingAudioAnalyzer:
             config: Configuration d'analyse (utilise les défauts si None)
         """
         self.config = config or MeetingAudioConfig()
+
+    # === Calcul des scores de qualité de réunion ===
 
     def _calculate_meeting_quality_score(self, sr: int, duration: float,
                                        speech_ratio: float, dynamic_range_db: float) -> tuple:
@@ -149,220 +140,236 @@ class MeetingAudioAnalyzer:
 
         return score, grade, statuses, recommendations
 
-"""
-Les visualisations aident à comprendre la dynamique de la réunion :
-- les moments où les participants parlent le plus
-- les périodes de silence
-- l'énergie globale de la discussion.
+    # === Génération des visualisations audio ===
 
-Cela peut aider à identifier les réunions productives et celles qui nécessitent des améliorations.
+    """
+    Les visualisations aident à comprendre la dynamique de la réunion :
+    - les moments où les participants parlent le plus
+    - les périodes de silence
+    - l'énergie globale de la discussion.
 
-La fonction peut également aider à diagnostiquer des problèmes techniques dans les enregistrements audio.
-"""
+    Cela peut aider à identifier les réunions productives et celles qui nécessitent des améliorations.
+
+    La fonction peut également aider à diagnostiquer des problèmes techniques dans les enregistrements audio.
+    """
 
 
-def _generate_meeting_visualizations(self, y: np.ndarray, sr: int,
+    def _generate_meeting_visualizations(self, y: np.ndarray, sr: int,
                                        duration: float, audio_path: str) -> None:
+            """
+            Génère des visualisations optimisées pour l'analyse de meetings :
+
+            1. Timeline audio avec détection des moments parlés (zones orangées)
+            2. Spectrogramme centré sur la bande voix humaine (200–4000Hz)
+            3. Histogramme silence vs parole – indicateur de dynamique
+            4. Suivi RMS (Root Mean Square) pour détecter les pics d’activité
+
+            Args:
+                y: Signal audio
+                sr: Sample rate
+                duration: Durée
+                audio_path: Chemin du fichier pour le titre
+            """
+            if not self.config.generate_plots:
+                return
+
+            try:
+                fig, axes = plt.subplots(2, 2, figsize=self.config.plot_figsize)
+                fig.suptitle(f'📊 Analyse Meeting Audio - {os.path.basename(audio_path)}'
+                            ,fontsize=16, fontweight='bold')
+
+                # 1. Timeline audio avec zones de parole
+                time = np.linspace(0, duration, len(y))
+                axes[0, 0].plot(time, y, linewidth=0.6, color='steelblue', alpha=0.7)
+
+                # Highlight des zones de forte activité (parole probable)
+                rms = librosa.feature.rms(y=y, frame_length=self.config.frame_length
+                                        ,hop_length=self.config.hop_length)[0]
+                time_rms = librosa.frames_to_time(np.arange(len(rms)), sr=sr
+                                                ,hop_length=self.config.hop_length)
+                speech_threshold = np.percentile(rms, 70)
+                speech_zones = rms > speech_threshold
+
+                for i in range(len(time_rms)-1):
+                    if speech_zones[i]:
+                        axes[0, 0].axvspan(time_rms[i], time_rms[i+1], alpha=0.3, color='orange')
+
+                axes[0, 0].set_title('🎤 Timeline Meeting avec zones de parole')
+                axes[0, 0].set_xlabel('Temps (minutes)')
+                axes[0, 0].set_ylabel('Amplitude')
+                axes[0, 0].grid(True, alpha=0.3)
+
+                # Conversion temps en minutes pour meeting
+                time_minutes = time / 60
+                axes[0, 0].set_xlim(0, duration/60)
+
+                # 2. Spectrogramme avec focus voix humaine (200-4000Hz)
+                D = librosa.amplitude_to_db(np.abs(librosa.stft(y)), ref=np.max)
+                img = librosa.display.specshow(D, y_axis='hz', x_axis='time'
+                                            ,sr=sr, ax=axes[0, 1], cmap='viridis'
+                                            ,fmax=4000)  # Focus fréquences voix
+                axes[0, 1].set_title('🎵 Spectrogramme (focus voix humaine)')
+                plt.colorbar(img, ax=axes[0, 1], format='%+2.0f dB')
+
+                # 3. Analyse des silences et activité
+                silence_threshold = np.percentile(np.abs(y), self.config.silence_percentile)
+                is_silence = np.abs(y) < silence_threshold
+
+                # Histogramme silence vs parole
+                categories = ['Silence', 'Parole']
+                values = [np.mean(is_silence), 1 - np.mean(is_silence)]
+                colors = ['lightcoral', 'lightgreen']
+
+                bars = axes[1, 0].bar(categories, values, color=colors, alpha=0.7)
+                axes[1, 0].set_title('📊 Répartition Silence / Parole')
+                axes[1, 0].set_ylabel('Proportion')
+                axes[1, 0].set_ylim(0, 1)
+
+                # Ajout des pourcentages sur les barres
+                for bar, value in zip(bars, values):
+                    height = bar.get_height()
+                    axes[1, 0].text(bar.get_x() + bar.get_width()/2., height + 0.01
+                                ,f'{value*100:.1f}%', ha='center', va='bottom', fontweight='bold')
+
+                # 4. Énergie RMS avec seuils meeting
+                axes[1, 1].plot(time_rms, rms, color='orange', linewidth=2, label='Énergie RMS')
+                axes[1, 1].axhline(y=speech_threshold, color='red', linestyle='--'
+                                ,alpha=0.7, label='Seuil parole')
+                axes[1, 1].fill_between(time_rms, rms, alpha=0.3, color='orange')
+                axes[1, 1].set_title('⚡ Énergie Meeting (détection activité)')
+                axes[1, 1].set_xlabel('Temps (minutes)')
+                axes[1, 1].set_ylabel('Énergie RMS')
+                axes[1, 1].legend()
+                axes[1, 1].grid(True, alpha=0.3)
+
+                plt.tight_layout()
+                plt.show()
+
+            except Exception as e:
+                logger.warning(f"Erreur génération visualisations meeting: {e}")
+
+    # === Fonction principale d'analyse audio de réunion ===
+
+    def analyze_meeting_audio_property(self, audio_path: Union[str, Path]) -> Dict:
         """
-        Génère des visualisations optimisées pour l'analyse de meetings.
+        Analyse complète d'un audio de réunion
+
+        Pipeline de traitement :
+        1. 📂 Validation et chargement du fichier (avec son sample rate natif)
+        2. 📊 Extraction des features clés :
+            - Durée, Speech/Silence Ratio
+            - Plage dynamique (dB)
+            - MFCCs (vecteurs vocaux)
+            - ZCR (clarté vocale)
+        3. 💡 Scoring & recommandations via `_calculate_meeting_quality_score`
+        4. 📉 Visualisation (optionnelle)
 
         Args:
-            y: Signal audio
-            sr: Sample rate
-            duration: Durée
-            audio_path: Chemin du fichier pour le titre
+            audio_path: Chemin vers le fichier audio
+
+        Retourne:
+            Dict: Propriétés audio et métriques spécifiques aux meetings
         """
-        if not self.config.generate_plots:
-            return
+        audio_path = Path(audio_path)
 
         try:
-            fig, axes = plt.subplots(2, 2, figsize=self.config.plot_figsize)
-            fig.suptitle(f'📊 Analyse Meeting Audio - {os.path.basename(audio_path)}',
-                        fontsize=16, fontweight='bold')
+            logger.info(f"🎤 Analyse audio meeting: {audio_path.name}")
 
-            # 1. Timeline audio avec zones de parole
-            time = np.linspace(0, duration, len(y))
-            axes[0, 0].plot(time, y, linewidth=0.6, color='steelblue', alpha=0.7)
+            # Validation et chargement
+            validated_path = validate_audio_path(audio_path)
+            if not validated_path:
+                return {"error": "file_validation_failed", "path": str(audio_path)}
 
-            # Highlight des zones de forte activité (parole probable)
-            rms = librosa.feature.rms(y=y, frame_length=self.config.frame_length,
-                                    hop_length=self.config.hop_length)[0]
-            time_rms = librosa.frames_to_time(np.arange(len(rms)), sr=sr,
-                                            hop_length=self.config.hop_length)
-            speech_threshold = np.percentile(rms, 70)
-            speech_zones = rms > speech_threshold
+            # Chargement avec sample rate original
+            y, sr = librosa.load(str(validated_path), sr=None)
+            duration = len(y) / sr
 
-            for i in range(len(time_rms)-1):
-                if speech_zones[i]:
-                    axes[0, 0].axvspan(time_rms[i], time_rms[i+1], alpha=0.3, color='orange')
+            logger.info(f"📈 Propriétés: {sr}Hz, {format_duration(duration)}")
 
-            axes[0, 0].set_title('🎤 Timeline Meeting avec zones de parole')
-            axes[0, 0].set_xlabel('Temps (minutes)')
-            axes[0, 0].set_ylabel('Amplitude')
-            axes[0, 0].grid(True, alpha=0.3)
+            # Génération des visualisations meeting
+            logger.info("🎨 Génération visualisations meeting...")
+            self._generate_meeting_visualizations(y, sr, duration, str(audio_path))
 
-            # Conversion temps en minutes pour meeting
-            time_minutes = time / 60
-            axes[0, 0].set_xlim(0, duration/60)
+            # Calculs des métriques meeting
+            logger.info("🔢 Calcul métriques meeting...")
 
-            # 2. Spectrogramme avec focus voix humaine (200-4000Hz)
-            D = librosa.amplitude_to_db(np.abs(librosa.stft(y)), ref=np.max)
-            img = librosa.display.specshow(D, y_axis='hz', x_axis='time',
-                                         sr=sr, ax=axes[0, 1], cmap='viridis',
-                                         fmax=4000)  # Focus fréquences voix
-            axes[0, 1].set_title('🎵 Spectrogramme (focus voix humaine)')
-            plt.colorbar(img, ax=axes[0, 1], format='%+2.0f dB')
-
-            # 3. Analyse des silences et activité
+            # Détection de silence adaptatif
             silence_threshold = np.percentile(np.abs(y), self.config.silence_percentile)
-            is_silence = np.abs(y) < silence_threshold
+            silence_ratio = np.mean(np.abs(y) < silence_threshold)
+            speech_ratio = 1 - silence_ratio
 
-            # Histogramme silence vs parole
-            categories = ['Silence', 'Parole']
-            values = [np.mean(is_silence), 1 - np.mean(is_silence)]
-            colors = ['lightcoral', 'lightgreen']
+            # Dynamic Range
+            max_amp = np.max(np.abs(y))
+            mean_amp = np.mean(np.abs(y))
+            dynamic_range_db = 20 * np.log10(max_amp / (mean_amp + 1e-8))
 
-            bars = axes[1, 0].bar(categories, values, color=colors, alpha=0.7)
-            axes[1, 0].set_title('📊 Répartition Silence / Parole')
-            axes[1, 0].set_ylabel('Proportion')
-            axes[1, 0].set_ylim(0, 1)
+            # Zero Crossing Rate (indicateur de clarté vocale)
+            zcr = librosa.feature.zero_crossing_rate(y)[0]
+            mean_zcr = np.mean(zcr)
 
-            # Ajout des pourcentages sur les barres
-            for bar, value in zip(bars, values):
-                height = bar.get_height()
-                axes[1, 0].text(bar.get_x() + bar.get_width()/2., height + 0.01,
-                              f'{value*100:.1f}%', ha='center', va='bottom', fontweight='bold')
+            # MFCC pour analyse vocale meeting
+            mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=self.config.n_mfcc)
+            mfcc_mean = np.mean(mfccs, axis=1)
 
-            # 4. Énergie RMS avec seuils meeting
-            axes[1, 1].plot(time_rms, rms, color='orange', linewidth=2, label='Énergie RMS')
-            axes[1, 1].axhline(y=speech_threshold, color='red', linestyle='--',
-                             alpha=0.7, label='Seuil parole')
-            axes[1, 1].fill_between(time_rms, rms, alpha=0.3, color='orange')
-            axes[1, 1].set_title('⚡ Énergie Meeting (détection activité)')
-            axes[1, 1].set_xlabel('Temps (minutes)')
-            axes[1, 1].set_ylabel('Énergie RMS')
-            axes[1, 1].legend()
-            axes[1, 1].grid(True, alpha=0.3)
+            # Score de qualité meeting
+            meeting_score, meeting_grade, meeting_statuses, recommendations = \
+                self._calculate_meeting_quality_score(sr, duration, speech_ratio, dynamic_range_db)
 
-            plt.tight_layout()
-            plt.show()
+            # Affichage des résultats
+            logger.info(f"📊 Métriques meeting:")
+            logger.info(f"   • Ratio parole: {speech_ratio*100:.1f}%")
+            logger.info(f"   • Score qualité: {meeting_score}/100 (Grade {meeting_grade})")
+            for status in meeting_statuses.values():
+                logger.info(f"   • {status}")
+
+            return {
+                # Propriétés de base
+                "duration": float(duration)
+                ,"duration_formatted": format_duration(duration)
+                ,"sample_rate": int(sr)
+                ,"samples_count": int(len(y))
+
+                # Métriques d'amplitude
+                ,"max_amplitude": float(max_amp)
+                ,"rms_energy": float(np.sqrt(np.mean(y**2)))
+                ,"mean_amplitude": float(mean_amp)
+
+                # Métriques meeting spécifiques
+                ,"silence_ratio": float(silence_ratio)
+                ,"speech_ratio": float(speech_ratio)
+                ,"dynamic_range_db": float(dynamic_range_db)
+                ,"zero_crossing_rate": float(mean_zcr)
+
+                # Score qualité meeting
+                ,"meeting_quality_score": int(meeting_score)
+                ,"meeting_quality_grade": meeting_grade
+                ,"meeting_status": meeting_statuses
+                ,"recommendations": recommendations
+
+                # Analyse vocale optimisée meeting
+                ,"mfcc_coefficients": [float(x) for x in mfcc_mean[:5]]
+                ,"vocal_clarity_score": float(1.0 / (1.0 + mean_zcr * 10))  # Score clarté
+
+                # Métadonnées
+                ,"analysis_method": "librosa + meeting_optimization"
+                ,"optimized_for": "meeting_analysis"
+                ,"config_used": {
+                    "silence_percentile": self.config.silence_percentile,
+                    "min_duration": self.config.min_meeting_duration
+                    }
+                }
 
         except Exception as e:
-            logger.warning(f"Erreur génération visualisations meeting: {e}")
-
-"""
-Les fonctions d'analyses audios sont conçues pour effectuer une analyse complète d'un enregistrement audio de réunion.
-
-"""
-def analyze_meeting_audio(self, audio_path: Union[str, Path]) -> Dict:
-    """
-    Analyse complète d'un audio de meeting.
-
-    Args:
-        audio_path: Chemin vers le fichier audio
-
-    Retourne:
-        Dict: Propriétés audio et métriques spécifiques aux meetings
-    """
-    audio_path = Path(audio_path)
-
-    try:
-        logger.info(f"🎤 Analyse audio meeting: {audio_path.name}")
-
-        # Validation et chargement
-        validated_path = validate_audio_path(audio_path)
-        if not validated_path:
-            return {"error": "file_validation_failed", "path": str(audio_path)}
-
-        # Chargement avec sample rate original
-        y, sr = librosa.load(str(validated_path), sr=None)
-        duration = len(y) / sr
-
-        logger.info(f"📈 Propriétés: {sr}Hz, {format_duration(duration)}")
-
-        # Génération des visualisations meeting
-        logger.info("🎨 Génération visualisations meeting...")
-        self._generate_meeting_visualizations(y, sr, duration, str(audio_path))
-
-        # Calculs des métriques meeting
-        logger.info("🔢 Calcul métriques meeting...")
-
-        # Détection de silence adaptatif
-        silence_threshold = np.percentile(np.abs(y), self.config.silence_percentile)
-        silence_ratio = np.mean(np.abs(y) < silence_threshold)
-        speech_ratio = 1 - silence_ratio
-
-        # Dynamic Range
-        max_amp = np.max(np.abs(y))
-        mean_amp = np.mean(np.abs(y))
-        dynamic_range_db = 20 * np.log10(max_amp / (mean_amp + 1e-8))
-
-        # Zero Crossing Rate (indicateur de clarté vocale)
-        zcr = librosa.feature.zero_crossing_rate(y)[0]
-        mean_zcr = np.mean(zcr)
-
-        # MFCC pour analyse vocale meeting
-        mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=self.config.n_mfcc)
-        mfcc_mean = np.mean(mfccs, axis=1)
-
-        # Score de qualité meeting
-        meeting_score, meeting_grade, meeting_statuses, recommendations = \
-            self._calculate_meeting_quality_score(sr, duration, speech_ratio, dynamic_range_db)
-
-        # Affichage des résultats
-        logger.info(f"📊 Métriques meeting:")
-        logger.info(f"   • Ratio parole: {speech_ratio*100:.1f}%")
-        logger.info(f"   • Score qualité: {meeting_score}/100 (Grade {meeting_grade})")
-        for status in meeting_statuses.values():
-            logger.info(f"   • {status}")
-
-        return {
-            # Propriétés de base
-            "duration": float(duration)
-            ,"duration_formatted": format_duration(duration)
-            ,"sample_rate": int(sr)
-            ,"samples_count": int(len(y))
-
-            # Métriques d'amplitude
-            ,"max_amplitude": float(max_amp)
-            ,"rms_energy": float(np.sqrt(np.mean(y**2)))
-            ,"mean_amplitude": float(mean_amp)
-
-            # Métriques meeting spécifiques
-            ,"silence_ratio": float(silence_ratio)
-            ,"speech_ratio": float(speech_ratio)
-            ,"dynamic_range_db": float(dynamic_range_db)
-            ,"zero_crossing_rate": float(mean_zcr)
-
-            # Score qualité meeting
-            ,"meeting_quality_score": int(meeting_score)
-            ,"meeting_quality_grade": meeting_grade
-            ,"meeting_status": meeting_statuses
-            ,"recommendations": recommendations
-
-            # Analyse vocale optimisée meeting
-            ,"mfcc_coefficients": [float(x) for x in mfcc_mean[:5]]
-            ,"vocal_clarity_score": float(1.0 / (1.0 + mean_zcr * 10))  # Score clarté
-
-            # Métadonnées
-            ,"analysis_method": "librosa + meeting_optimization"
-            ,"optimized_for": "meeting_analysis"
-            ,"config_used": {
-                "silence_percentile": self.config.silence_percentile,
-                "min_duration": self.config.min_meeting_duration
+            logger.error(f"❌ Erreur analyse audio meeting: {e}")
+            return {
+                "error": str(e),
+                "error_type": "meeting_audio_analysis_failure",
+                "suggestion": "Vérifiez le format audio et la qualité d'enregistrement"
                 }
-            }
 
-    except Exception as e:
-        logger.error(f"❌ Erreur analyse audio meeting: {e}")
-        return {
-            "error": str(e),
-            "error_type": "meeting_audio_analysis_failure",
-            "suggestion": "Vérifiez le format audio et la qualité d'enregistrement"
-            }
 
 # Factory function
-def analyze_meeting_audio(audio_path: Union[str, Path],
+def analyze_meeting_audio_file(audio_path: Union[str, Path],
                          generate_plots: bool = True,
                          **config_kwargs) -> Dict:
     """
