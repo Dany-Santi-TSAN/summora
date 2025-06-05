@@ -19,9 +19,9 @@ class MeetingPipelineConfig:
     whisper_model: str = "base"
     whisper_temperature: float = 0.0
     whisper_initial_prompt: str = (
-        "Transcription d'une réunion professionnelle en français. "
+        "Transcription d'une réunion professionnelle en français."
         "Participants multiples discutant d'actions, décisions, planning et objectifs. "
-        "Terminologie business et technique française avec quelques termes anglais."
+        "Le vocabulaire inclut des termes business, marketing, finance, logistique et technique, avec quelques anglicismes."
     )
 
     # Configuration extraction meeting
@@ -32,12 +32,12 @@ class MeetingPipelineConfig:
 
     # Configuration audio
     generate_audio_plots: bool = True
-    min_meeting_duration: float = 60.0  # 1 minute minimum
+    min_meeting_duration: float = 60.0  # 60sec minimum
     optimal_speech_ratio: float = 0.65   # 65% de parole idéal
 
     # Configuration outputs
     save_results: bool = False
-    output_format: str = "meeting_summary"  # ou "executive_report", "action_list"
+    output_format: str = "executive_report"
     include_timestamps: bool = True
     include_confidence_scores: bool = True
 
@@ -55,7 +55,7 @@ class MeetingOutputConfig:
     """Configuration pour les formats de sortie meeting."""
 
     # Format principal
-    format_type: str = "meeting_summary"  # meeting_summary, executive_report, action_tracker
+    format_type: str = "executive_report"
 
     # Sections à inclure
     include_audio_analysis: bool = True
@@ -75,8 +75,8 @@ class MeetingOutputConfig:
     # Export options
     export_to_json: bool = False
     export_to_markdown: bool = False
-    export_to_notion: bool = False  # Future feature
-    export_to_slack: bool = False   # Future feature
+    export_to_notion: bool = False  # Future feature v2
+    export_to_slack: bool = False   # Future feature v2
 
 @dataclass
 class MeetingQualityThresholds:
@@ -178,7 +178,7 @@ class MeetingConfigManager:
         """
         Valide la cohérence de la configuration.
 
-        Returns:
+        Retourne:
             List[str]: Liste des erreurs/warnings de configuration
         """
         issues = []
@@ -211,7 +211,7 @@ class MeetingConfigManager:
         Args:
             meeting_type: Type de meeting (sprint, budget, strategic, etc.)
 
-        Returns:
+        Retourne:
             MeetingConfigManager: Configuration adaptée
         """
         # Configuration de base
@@ -290,7 +290,7 @@ class MeetingConfigManager:
         Args:
             config_dict: Configuration en format dictionnaire
 
-        Returns:
+        Retourne:
             MeetingConfigManager: Instance configurée
         """
         # Reconstruction des configs depuis le dict
