@@ -58,7 +58,7 @@ except ImportError:
     logger = logging.getLogger(__name__)
     logger.warning("LDA non disponible - utilisation YAKE + TF-IDF uniquement")
 
-# === Extractor setup ===
+# === Configuration Extractor setup ===
 
 @dataclass
 class MeetingExtractionConfig:
