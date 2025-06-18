@@ -6,6 +6,10 @@ __pycache__/
 # C extensions
 *.so
 
+# Dossier
+data/
+output
+
 # Métadonnées windows
 *:Zone.Identifier
 *.Zone.Identifier
