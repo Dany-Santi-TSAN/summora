@@ -1,104 +1,225 @@
 #!/usr/bin/env python3
 """
-Summora - Version test avec TEXTE COMPLET
+Summora Test CLI - Tests rapides de transcription meeting
+Usage: python main_test.py audio.mp3 --model small --verbose
 """
-import sys
+import argparse
 import logging
+import sys
 from pathlib import Path
+from datetime import datetime
 
-logging.basicConfig(level=logging.INFO, format='%(levelname)s - %(message)s')
+# Import des modules Summora
+from src.core.transcriber import create_meeting_transcriber, transcribe_meeting_audio
+from src.core.audio_analyzer import analyze_meeting_audio_file
+from src.core.utils import validate_audio_path, get_supported_formats
 
-from src.core.utils import validate_audio_path
-from src.core.transcriber import transcribe_meeting_audio
-from src.meeting.extractor import extract_meeting_content
+def setup_logging(verbose: bool = False):
+    """Configure le logging selon le niveau de verbosité."""
+    level = logging.DEBUG if verbose else logging.INFO
+    logging.basicConfig(
+        level=level,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%H:%M:%S'
+    )
 
-def test_transcription_with_full_text(audio_path: str, save_to_file: bool = True):
-    """Test avec affichage du texte complet."""
-    print(f"🎤 Test transcription COMPLÈTE: {Path(audio_path).name}")
-    print("-" * 50)
+def print_results(transcription_result: dict, audio_analysis: dict = None):
+    """Affiche les résultats de manière propre."""
+    print("\n" + "="*60)
+    print("🎤 RÉSULTATS SUMMORA TEST")
+    print("="*60)
 
-    # Validation fichier
-    validated_path = validate_audio_path(audio_path)
-    if not validated_path:
-        print(f"❌ Fichier audio invalide: {audio_path}")
+    if "error" in transcription_result:
+        print(f"❌ Erreur: {transcription_result['message']}")
         return
 
-    # Transcription
-    print("🔄 Transcription en cours...")
-    result = transcribe_meeting_audio(validated_path, model_size="tiny")
+    # Info générale
+    print(f"📝 Mots transcrits: {transcription_result['word_count']}")
+    print(f"⏱️  Durée: {transcription_result['duration_formatted']}")
+    print(f"🎯 Confiance: {transcription_result['meeting_confidence']['meeting_confidence']:.3f}")
+    print(f"📊 Grade: {transcription_result['meeting_confidence']['confidence_grade']}")
+    print(f"💬 Débit: {transcription_result['speaking_rate']:.1f} mots/min")
 
-    if "error" in result:
-        print(f"❌ Erreur: {result['message']}")
-        return
+    # Métriques meeting
+    content = transcription_result['meeting_content']
+    print(f"🔥 Densité meeting: {content['meeting_density']:.1f}%")
+    print(f"⚡ Actions détectées: {content['keyword_counts'].get('action', 0)}")
+    print(f"✅ Décisions détectées: {content['keyword_counts'].get('decision', 0)}")
 
-    # Métadonnées
-    text = result.get("text", "")
-    word_count = result.get("word_count", 0)
-    duration = result.get("duration_formatted", "N/A")
-    confidence = result.get("meeting_confidence", {}).get("meeting_confidence", 0)
+    # Aperçu du texte
+    print(f"\n📖 Aperçu transcription:")
+    print(f"'{transcription_result['preview']}'")
 
-    print(f"✅ Transcription réussie!")
-    print(f"   📝 Mots: {word_count}")
-    print(f"   ⏱️ Durée: {duration}")
-    print(f"   🎯 Confiance: {confidence:.3f}")
-    print()
-
-    # === TEXTE COMPLET ===
-    print("=" * 80)
-    print("📄 TRANSCRIPTION COMPLÈTE")
-    print("=" * 80)
-    print(text)
-    print("=" * 80)
-    print(f"FIN - {len(text)} caractères, {word_count} mots")
-    print("=" * 80)
-
-    # Sauvegarde optionnelle
-    if save_to_file:
-        output_file = f"transcription_{Path(audio_path).stem}.txt"
-
-        with open(output_file, 'w', encoding='utf-8') as f:
-            f.write("=== TRANSCRIPTION SUMMORA ===\n")
-            f.write(f"Fichier source: {audio_path}\n")
-            f.write(f"Mots transcrits: {word_count}\n")
-            f.write(f"Durée: {duration}\n")
-            f.write(f"Confiance: {confidence:.3f}\n")
-            f.write(f"Modèle: tiny\n")
-            f.write("=" * 50 + "\n\n")
-            f.write(text)
-            f.write(f"\n\n=== FIN TRANSCRIPTION ===\n")
-
-        print(f"💾 Transcription sauvée dans: {output_file}")
-
-    return result
+    # Audio analysis si disponible
+    if audio_analysis and "error" not in audio_analysis:
+        print(f"\n🎵 Analyse audio:")
+        print(f"   • Sample rate: {audio_analysis['sample_rate']} Hz")
+        print(f"   • Ratio parole: {audio_analysis['speech_ratio']*100:.1f}%")
+        print(f"   • Score qualité: {audio_analysis['meeting_quality_score']}/100")
+        print(f"   • Grade audio: {audio_analysis['meeting_quality_grade']}")
 
 def main():
-    """Point d'entrée pour voir le texte complet."""
-    if len(sys.argv) < 2:
-        print("Usage:")
-        print("  python main_test_full.py <audio_file> [--no-save]")
-        print()
-        print("Options:")
-        print("  --no-save    Ne pas sauvegarder dans un fichier")
-        print()
-        print("Exemples:")
-        print("  python main_test_full.py audio-om-mercato-test.mp3")
-        print("  python main_test_full.py audio-om-mercato-test.mp3 --no-save")
-        return
+    """Point d'entrée principal du test CLI."""
+    parser = argparse.ArgumentParser(
+        description="Summora Test CLI - Tests rapides transcription meeting",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Exemples d'usage:
+  python main_test.py audio.mp3                    # Test avec modèle base
+  python main_test.py audio.wav --model small      # Test avec modèle small
+  python main_test.py audio.m4a --model medium -v  # Test verbose avec medium
+  python main_test.py audio.mp3 --no-audio         # Transcription uniquement
+        """
+    )
 
-    audio_path = sys.argv[1]
-    save_file = "--no-save" not in sys.argv
+    # Arguments positionnels
+    parser.add_argument(
+        "audio_file",
+        type=str,
+        help="Chemin vers le fichier audio à transcrire"
+    )
 
-    if not Path(audio_path).exists():
-        print(f"❌ Fichier non trouvé: {audio_path}")
-        return
+    # Options de transcription
+    parser.add_argument(
+        "--model", "-m",
+        type=str,
+        choices=["tiny", "base", "small", "medium", "large"],
+        default="base",
+        help="Modèle Whisper à utiliser (défaut: base)"
+    )
+
+    parser.add_argument(
+        "--language", "-l",
+        type=str,
+        default="fr",
+        help="Langue de transcription (défaut: fr)"
+    )
+
+    parser.add_argument(
+        "--temperature", "-t",
+        type=float,
+        default=0.0,
+        help="Température Whisper (0.0-1.0, défaut: 0.0)"
+    )
+
+    # Options d'analyse
+    parser.add_argument(
+        "--no-audio",
+        action="store_true",
+        help="Skip l'analyse audio (transcription uniquement)"
+    )
+
+    parser.add_argument(
+        "--no-plots",
+        action="store_true",
+        help="Désactive les visualisations audio"
+    )
+
+    # Options d'affichage
+    parser.add_argument(
+        "--verbose", "-v",
+        action="store_true",
+        help="Mode verbeux (logs détaillés)"
+    )
+
+    parser.add_argument(
+        "--quiet", "-q",
+        action="store_true",
+        help="Mode silencieux (résultats uniquement)"
+    )
+
+    parser.add_argument(
+        "--full-text",
+        action="store_true",
+        help="Affiche le texte complet (pas seulement l'aperçu)"
+    )
+
+    # Utilitaires
+    parser.add_argument(
+        "--list-formats",
+        action="store_true",
+        help="Liste les formats audio supportés"
+    )
+
+    args = parser.parse_args()
+
+    # Gestion des options utilitaires
+    if args.list_formats:
+        formats = get_supported_formats()
+        print("📁 Formats audio supportés:")
+        for fmt in sorted(formats):
+            print(f"   • {fmt}")
+        return 0
+
+    # Configuration logging
+    if not args.quiet:
+        setup_logging(args.verbose)
+
+    logger = logging.getLogger(__name__)
 
     try:
-        test_transcription_with_full_text(audio_path, save_to_file=save_file)
+        # Validation du fichier
+        audio_path = Path(args.audio_file)
+        if not validate_audio_path(audio_path):
+            print(f"❌ Fichier audio invalide: {audio_path}")
+            return 1
+
+        if not args.quiet:
+            print(f"🚀 Démarrage test Summora")
+            print(f"📁 Fichier: {audio_path.name}")
+            print(f"🤖 Modèle: {args.model}")
+            print(f"🌍 Langue: {args.language}")
+            print("-" * 50)
+
+        start_time = datetime.now()
+
+        # 1. Transcription
+        if not args.quiet:
+            logger.info(f"🎤 Transcription avec modèle {args.model}...")
+
+        transcription_result = transcribe_meeting_audio(
+            audio_path,
+            model_size=args.model,
+            language=args.language,
+            temperature=args.temperature
+        )
+
+        # 2. Analyse audio (optionnelle)
+        audio_analysis = None
+        if not args.no_audio and "error" not in transcription_result:
+            if not args.quiet:
+                logger.info("🎵 Analyse des propriétés audio...")
+
+            from src.core.audio_analyzer import MeetingAudioAnalyzer, MeetingAudioConfig
+
+            audio_config = MeetingAudioConfig(generate_plots=not args.no_plots)
+            audio_analyzer = MeetingAudioAnalyzer(audio_config)
+            audio_analysis = audio_analyzer.analyze_meeting_audio_property(audio_path)
+
+        end_time = datetime.now()
+        processing_time = (end_time - start_time).total_seconds()
+
+        # 3. Affichage des résultats
+        if not args.quiet:
+            print_results(transcription_result, audio_analysis)
+            print(f"\n⏱️  Temps total: {processing_time:.2f}s")
+        else:
+            # Mode quiet : juste le texte
+            if "error" not in transcription_result:
+                text = transcription_result['text'] if args.full_text else transcription_result['preview']
+                print(text)
+
+        return 0
 
     except KeyboardInterrupt:
-        print("\n❌ Test interrompu")
+        print("\n⚠️ Interruption utilisateur")
+        return 1
     except Exception as e:
-        print(f"❌ Erreur inattendue: {e}")
+        logger.error(f"❌ Erreur inattendue: {e}")
+        if args.verbose:
+            import traceback
+            traceback.print_exc()
+        return 1
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

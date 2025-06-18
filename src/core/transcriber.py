@@ -299,7 +299,12 @@ class MeetingTranscriber:
                 preview = cleaned_text
 
             # Log des résultats
-            logger.info(f"✅ Transcription meeting terminée en {processing_time:.2f}s")
+            if processing_time >= 60:
+                minutes = int(processing_time // 60)
+                seconds = int(processing_time % 60)
+                logger.info(f"✅ Transcription meeting terminée en {minutes}m {seconds}s")
+            else:
+                logger.info(f"✅ Transcription meeting terminée en {processing_time:.2f}s")
             logger.info(f"📝 {word_count} mots | {format_duration(duration)}")
             logger.info(f"🎯 Confiance meeting: {confidence_analysis['meeting_confidence']:.3f} ({confidence_analysis['confidence_grade']})")
             logger.info(f"💡 Densité meeting: {content_analysis['meeting_density']:.1f}%")
