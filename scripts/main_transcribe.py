@@ -61,7 +61,7 @@ def save_transcription(transcription_result: dict, audio_path: Path, model: str,
         save_path = Path(output_file)
     else:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        save_path = Path(f"transcription_{audio_path.stem}_{model}_{timestamp}.txt")
+        save_path = Path('output/transcriptions') / (f"transcription_{audio_path.stem}_{model}_{timestamp}.txt")
 
     # Métadonnées
     metadata = {
@@ -207,100 +207,102 @@ def print_summary(transcription_result: dict, audio_path: Path, model: str,
     print("="*50)
 
 def main():
-    """Point d'entrée principal du module de transcription."""
+    """
+    Point d'entrée principal du module de transcription.
+    """
     parser = argparse.ArgumentParser(
         description="Summora - Module de Transcription",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Exemples d'usage:
-  python main_transcribe.py audio.mp3                    # Transcription basique
-  python main_transcribe.py audio.wav --model small      # Modèle spécifique
-  python main_transcribe.py audio.mp3 --full-text        # Affichage complet
-  python main_transcribe.py audio.mp3 --output result.txt # Fichier personnalisé
-  python main_transcribe.py audio.mp3 --no-save --quiet  # Juste la transcription
-        """
+    Exemples d'usage:
+    python main_transcribe.py audio.mp3                     # Transcription basique
+    python main_transcribe.py audio.wav --model small       # Modèle spécifique
+    python main_transcribe.py audio.mp3 --full-text         # Affichage complet
+    python main_transcribe.py audio.mp3 --output result.txt # Fichier personnalisé
+    python main_transcribe.py audio.mp3 --no-save --quiet   # Juste la transcription
+    """
     )
 
     # Arguments obligatoires
     parser.add_argument(
-        "audio_file",
-        type=str,
-        help="Fichier audio à transcrire"
+        "audio_file"
+        ,type=str
+        ,help="Fichier audio à transcrire"
     )
 
     # Configuration transcription
     parser.add_argument(
-        "--model", "-m",
-        type=str,
-        choices=["tiny", "base", "small", "medium", "large"],
-        default="base",
-        help="Modèle Whisper (défaut: base)"
+        "--model", "-m"
+        ,type=str
+        ,choices=["tiny", "base", "small", "medium", "large"]
+        ,default="base"
+        ,help="Modèle Whisper (défaut: base)"
     )
 
     parser.add_argument(
-        "--language", "-l",
-        type=str,
-        default="fr",
-        help="Langue de transcription (défaut: fr)"
+        "--language", "-l"
+        ,type=str
+        ,default="fr"
+        ,help="Langue de transcription (défaut: fr)"
     )
 
     parser.add_argument(
-        "--temperature", "-t",
-        type=float,
-        default=0.0,
-        help="Température Whisper (0.0-1.0, défaut: 0.0)"
+        "--temperature", "-t"
+        ,type=float
+        ,default=0.0
+        ,help="Température Whisper (0.0-1.0, défaut: 0.0)"
     )
 
     # Options d'affichage
     parser.add_argument(
-        "--full-text",
-        action="store_true",
-        help="Affiche la transcription complète"
+        "--full-text"
+        ,action="store_true"
+        ,help="Affiche la transcription complète"
     )
 
     parser.add_argument(
-        "--no-preview",
-        action="store_true",
-        help="N'affiche pas l'aperçu de transcription"
+        "--no-preview"
+        ,action="store_true"
+        ,help="N'affiche pas l'aperçu de transcription"
     )
 
     # Options de sauvegarde
     parser.add_argument(
-        "--no-save",
-        action="store_true",
-        help="Ne sauvegarde pas la transcription"
+        "--no-save"
+        ,action="store_true"
+        ,help="Ne sauvegarde pas la transcription"
     )
 
     parser.add_argument(
-        "--output", "-o",
-        type=str,
-        help="Nom du fichier de sortie"
+        "--output", "-o"
+        ,type=str
+        ,help="Nom du fichier de sortie"
     )
 
     parser.add_argument(
-        "--json-metadata",
-        action="store_true",
-        help="Sauvegarde aussi les métadonnées en JSON"
+        "--json-metadata"
+        ,action="store_true"
+        ,help="Sauvegarde aussi les métadonnées en JSON"
     )
 
     # Options système
     parser.add_argument(
-        "--verbose", "-v",
-        action="store_true",
-        help="Mode verbeux"
+        "--verbose", "-v"
+        ,action="store_true"
+        ,help="Mode verbeux"
     )
 
     parser.add_argument(
-        "--quiet", "-q",
-        action="store_true",
-        help="Mode silencieux (transcription uniquement)"
+        "--quiet", "-q"
+        ,action="store_true"
+        ,help="Mode silencieux (transcription uniquement)"
     )
 
     # Utilitaires
     parser.add_argument(
-        "--list-formats",
-        action="store_true",
-        help="Liste les formats audio supportés"
+        "--list-formats"
+        ,action="store_true"
+        ,help="Liste les formats audio supportés"
     )
 
     args = parser.parse_args()
