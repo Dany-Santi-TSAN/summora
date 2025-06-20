@@ -394,3 +394,54 @@ class BusinessMetricsCalculator:
     def __init__(self, config: ExtractionConfig):
         self.config = config
         self.logger = logging.getLogger(__name__)
+
+    def calculate_business_metrics(self, text: str, actions: List[Dict],
+                                 decisions: List[Dict]) -> Dict:
+
+        """
+        Calcule des métriques business pour les réunions.
+
+        Args:
+            text: Transcrption complète
+            actions: Liste des actions détectées (detect_actions_decisions)
+            decisions: Liste des décisions détectées (detect_actions_decisions)
+
+        Retourne:
+            Dict avec métriques business
+        """
+        word_count = len(text.split())
+
+        #Densité actionnable
+        actionnable_items = len(actions) + len(decisions)
+        actionnable_density = (actionnable_items / word_count * 100) if word_count > 0 else 0
+
+        #Ration action/décision
+        if len(decisions) > 0:
+            action_decision_ratio = len(actions) / len(decisions)
+        else:
+            action_decision_ratio = len(actions) if len(actions) > 0 else 0
+
+        #Scoring efficacité meeting
+        efficiency_score = min(actionnable_density * 10 ,100)
+
+        #Détection de structure avec booléen
+        text_lower = text.lower()
+        structure_indicators = [
+            'ordre du jour', 'pour commencer','agenda', 'point suivant', 'première partie',
+            'pour conclure', 'pour finir', 'synthèse', 'résumé', 'bilan', 'next steps'
+        ]
+
+        structure_detected = any(indicator in text_lower for indicator in structure_indicators)
+
+        return {
+            'word_count': word_count,
+            'actionnable_items_count': actionnable_items,
+            'actionnable_density_percent': round(actionnable_density, 2),
+            'actions_count': len(actions),
+            'decisions_count': len(decisions),
+            'action_decision_ratio': round(action_decision_ratio, 2),
+            'meeting_efficiency_score': round(efficiency_score, 1),
+            'has_meeting_structure': structure_detected,
+            'avg_action_confidence': round(sum(a['confidence_score'] for a in actions) / len(actions), 2) if actions else 0,
+            'avg_decision_confidence': round(sum(d['confidence_score'] for d in decisions) / len(decisions), 2) if decisions else 0
+        }
