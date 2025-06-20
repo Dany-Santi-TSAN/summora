@@ -3,7 +3,6 @@ Transcripteur audio spécialisé pour les réunions
 Whisper optimisé avec prompts et configuration meeting-specific
 """
 import re
-import traceback
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Union,List

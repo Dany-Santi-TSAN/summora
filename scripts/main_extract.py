@@ -31,7 +31,35 @@ except ImportError:
 try:
     import nltk
     from nltk.tokenize import sent_tokenize, word_tokenize
-    from nltk.corpus import stopwords, opinion_lexicon
+    from nltk.corpus import stopwords, opinion_lexicon, names, extended_omw, wordnet, reuters
     NLTK_AVAILABLE = True
 except ImportError:
     NLTK_AVAILABLE = False
+
+# Import Summora utils
+
+try:
+    import sys
+    from pathlib import Path
+    sys.path.append(str(Path(__file__).parent.parent))
+    from src.core.utils import get_meeting_stopwords
+    SUMMORA_UTILS_AVAILABLE = True
+except ImportError:
+    SUMMORA_UTILS_AVAILABLE = False
+
+def setup_logging(verbose: bool = False, quiet: bool = False):
+    """
+    Configuration du logging
+    """
+    if quiet:
+        level = logging.WARNING
+    elif verbose:
+        level = logging.DEBUG
+    else:
+        level = logging.INFO
+
+    logging.basicConfig(
+        level=level
+        ,format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        ,datefmt='%H:%M:%S'
+    )
