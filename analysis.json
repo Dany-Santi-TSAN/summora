@@ -1,0 +1,49 @@
+{
+  "source": {
+    "file_name": "test-reunion.mp3",
+    "file_path": "/home/dany_tsan/code/Dany-Santi-TSAN/summora/data/test-reunion.mp3",
+    "analysis_timestamp": "2025-06-24T11:33:06.972761"
+  },
+  "analysis": {
+    "duration": 689.084081632653,
+    "duration_formatted": "11m 29s",
+    "sample_rate": 44100,
+    "samples_count": 30388608,
+    "max_amplitude": 0.9621642827987671,
+    "rms_energy": 0.05162918195128441,
+    "mean_amplitude": 0.026048151776194572,
+    "silence_ratio": 0.14999999341858633,
+    "speech_ratio": 0.8500000065814137,
+    "dynamic_range_db": 31.34944301264921,
+    "zero_crossing_rate": 0.053845666697028796,
+    "meeting_quality_score": 85,
+    "meeting_quality_grade": "A+",
+    "meeting_status": {
+      "sample_rate": "✅ Qualité optimale pour meeting",
+      "duration": "✅ Durée appropriée (11m 29s)",
+      "speech_ratio": "⚠️ Beaucoup de parole (85.0%)",
+      "dynamic_range": "✅ Qualité audio claire"
+    },
+    "recommendations": [
+      "Meeting dense - prévoir des pauses"
+    ],
+    "mfcc_coefficients": [
+      -356.52130126953125,
+      105.5943832397461,
+      6.225955963134766,
+      14.21423053741455,
+      6.295223712921143
+    ],
+    "vocal_clarity_score": 0.6500020582115706,
+    "analysis_method": "librosa + meeting_optimization",
+    "optimized_for": "meeting_analysis",
+    "config_used": {
+      "silence_percentile": 15.0,
+      "min_duration": 60.0
+    }
+  },
+  "metadata": {
+    "summora_version": "1.0",
+    "analysis_type": "meeting_audio_properties"
+  }
+}

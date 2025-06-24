@@ -385,4 +385,4 @@ def analyze_meeting_audio_file(audio_path: Union[str, Path],
     """
     config = MeetingAudioConfig(generate_plots=generate_plots, **config_kwargs)
     analyzer = MeetingAudioAnalyzer(config)
-    return analyzer.analyze_meeting_audio(audio_path)
+    return analyzer.analyze_meeting_audio_property(audio_path)
