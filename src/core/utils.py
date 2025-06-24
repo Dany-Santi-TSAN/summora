@@ -16,37 +16,6 @@ SUPPORTED_AUDIO_FORMATS: Set[str] = {
     ".mp3", ".mp4", ".mpeg", ".mpga", ".m4a", ".wav", ".webm"
 }
 
-# Ajout de mots vides courants non inclus dans NLTK
-# Liste de +400 mots : https://countwordsfree.com/stopwords/french
-# Liste spécifique pour le meeting, enrichissement fréquent
-
-MEETING_STOPWORDS_ADDITIONAL = [
-    # Pronoms / Verbes fréquents / Grammaire
-    "être", "avoir", "faire", "aller", "venir", "voir", "savoir", "pouvoir", "vouloir",
-    "falloir", "devoir", "dire", "prendre", "mettre", "donner", "très", "tout", "tous", "toutes",
-
-    # Connecteurs de réunion
-    "alors", "donc", "du coup", "ensuite", "après", "puis", "en fait",
-    "enfin", "voilà", "bref", "par contre", "quand même", "de toute façon",
-
-    # Fillers spécifiques réunions
-    "heu", "euh", "bah", "ben", "hein", "quoi", "genre", "ouais", "ouai",
-    "nan", "d'accord", "ok", "okay", "parfait", "exact", "putain", "de ouf", "fréro", "grave",
-
-    # Expressions meetings
-    "on va", "il faut", "je pense", "je crois", "on peut", "ça va",
-    "c'est bon", "ok alors", "du coup on", "donc on", "alors on", "bon alors",
-    "en vrai", "gros", "c'est relou", "c'est chiant", "tu vois", "je sais pas",
-    "je veux dire", "c’est clair", "tu sais", "en gros", "en mode", "ça veut dire",
-    "tu m’entends", "si tu veux", "je dirais", "ça marche", "j’sais pas", "c’est genre",
-    "du style", "genre de truc", "truc de ouf", "c’est chaud", "tu vois ce que je veux dire",
-    "tu comprends", "j’veux dire", "tu me suis", "vois-tu", "c'est abusé",
-
-    # Politesse & social
-    "merci", "s'il vous plaît", "s'il te plaît", "excusez-moi", "pardon", "désolé",
-    "bonjour", "bonsoir", "au revoir", "à bientôt", "bonne journée", "sorry", "thanks", "ciao", "bye"
-]
-
 def setup_nltk_ressource() -> bool:
     """
     Configure les ressources linguistique NLTK nécessaires.
@@ -80,6 +49,7 @@ def setup_nltk_ressource() -> bool:
 def get_meeting_stopwords() -> Set[str]:
     """
     Retourne l'ensemble complet des stopwords français spécifique au meeting.
+    Utilise le module spécialisé utils_stopwords_meeting_fr.
 
     Retourne:
         Set[str]: Stopwords français NLTK + extensions spécifiques au meeting
@@ -91,14 +61,61 @@ def get_meeting_stopwords() -> Set[str]:
         logger.warning(f"Erreur chargement stopwords NLTK: {e}")
         french_stopwords = set()
 
-    # Ajout de la liste des stopwords spécifique au meeting
-    french_stopwords.update(MEETING_STOPWORDS_ADDITIONAL)
-    logger.info(f"📋 {len(french_stopwords)} stopwords français (meeting-optimized)")
+    # Import du module spécialisé stopwords meetings
+    try:
+        from .utils_stopwords_meeting_fr import get_all_meeting_stopwords_fr
+        meeting_stopwords = get_all_meeting_stopwords_fr()
 
-    return french_stopwords
+        # Combinaison NLTK + meetings spécialisés
+        all_stopwords = french_stopwords.union(meeting_stopwords)
+
+        logger.info(f"📋 {len(french_stopwords)} stopwords NLTK français")
+        logger.info(f"📋 {len(meeting_stopwords)} stopwords meetings spécialisés")
+        logger.info(f"📋 {len(all_stopwords)} stopwords total (optimized)")
+
+        return all_stopwords
+
+    except ImportError as e:
+        logger.error(f"❌ Erreur import stopwords meetings: {e}")
+        logger.info("🔄 Fallback vers stopwords NLTK uniquement")
+        return french_stopwords
+
+def get_stopwords_by_category(category: str) -> Set[str]:
+    """
+    Retourne les stopwords d'une catégorie spécifique.
+
+    Args:
+        category: Catégorie de stopwords ('contractions', 'basic', 'verbs', etc.)
+
+    Retourne:
+        Set[str]: Stopwords de la catégorie
+    """
+    try:
+        from .utils_stopwords_meeting_fr import get_category_stopwords
+        return get_category_stopwords(category)
+    except ImportError:
+        logger.warning(f"Module stopwords meetings non disponible pour catégorie '{category}'")
+        return set()
+
+def validate_stopwords_coverage(problematic_words: list) -> dict:
+    """
+    Valide la couverture des stopwords sur des mots problématiques.
+
+    Args:
+        problematic_words: Liste des mots qui passent dans les topics
+
+    Returns:
+        dict: Statistiques de couverture
+    """
+    try:
+        from .utils_stopwords_meeting_fr import analyze_stopwords_coverage
+        return analyze_stopwords_coverage(problematic_words)
+    except ImportError:
+        logger.warning("Module stopwords meetings non disponible pour validation")
+        return {"coverage_rate": 0.0, "error": "module_unavailable"}
 
 """
-Validation des fichiers audio
+Validation des fichiers audio (inchangé)
 """
 
 def is_audio_file(filename: str | Path) -> bool:
@@ -146,17 +163,8 @@ def get_supported_formats() -> Set[str]:
     """
     return SUPPORTED_AUDIO_FORMATS.copy()
 
-def get_supported_formats() -> Set[str]:
-    """
-    Retourne la liste des formats audio supportés.
-
-    Retourne:
-        Set[str]: Ensemble des extensions supportées
-    """
-    return SUPPORTED_AUDIO_FORMATS.copy()
-
 """
-Nettoyage spécifique pour la transcription
+Nettoyage spécifique pour la transcription (inchangé)
 """
 
 def format_duration(seconds: float) -> str:
@@ -202,3 +210,31 @@ def clean_text_for_meeting(text: str) -> str:
     text = re.sub(r'\b(\w+)\s+\1\b', r'\1', text)  # "le le" -> "le"
 
     return text.strip()
+
+# === TESTS UTILITAIRES ===
+# Note: En prod, ces tests iraient dans tests, mais on teste ici dans un premier temps pour fixer un bug
+
+if __name__ == "__main__":
+    # Simple validation pour debug développement
+    print("🔍 VALIDATION UTILS STOPWORDS")
+    print("=" * 40)
+
+    # Test basique chargement
+    stopwords = get_meeting_stopwords()
+    print(f"📋 {len(stopwords)} stopwords chargés pour meetings")
+
+    # Test mots problématiques de tes résultats
+    problematic = ["c'est", "qu'il", "j'ai", "bon", "oui", "fin"]
+    coverage = validate_stopwords_coverage(problematic)
+
+    if coverage.get('coverage_rate', 0) > 0:
+        print(f"🎯 Couverture: {coverage['coverage_rate']*100:.1f}%")
+
+        # Test catégorie si module disponible
+        contractions = get_stopwords_by_category('contractions')
+        if contractions:
+            print(f"📝 Contractions: {len(contractions)} mots")
+
+        print("✅ Integration stopwords OK")
+    else:
+        print("⚠️ Module stopwords meetings pas encore créé")

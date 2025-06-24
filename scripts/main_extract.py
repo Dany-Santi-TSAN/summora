@@ -36,16 +36,27 @@ try:
 except ImportError:
     NLTK_AVAILABLE = False
 
-# Import Summora utils
+
+#### Import Summora utils - Version mise à jour ####
 
 try:
     import sys
     from pathlib import Path
     sys.path.append(str(Path(__file__).parent.parent))
     from src.core.utils import get_meeting_stopwords
+
+    # ✅ NOUVEAU: Import fallback depuis module spécialisé
+    try:
+        from src.core.utils_stopwords_meeting_fr import get_fallback_stopwords_fr
+        FALLBACK_STOPWORDS_AVAILABLE = True
+    except ImportError:
+        FALLBACK_STOPWORDS_AVAILABLE = False
+
     SUMMORA_UTILS_AVAILABLE = True
 except ImportError:
     SUMMORA_UTILS_AVAILABLE = False
+    FALLBACK_STOPWORDS_AVAILABLE = False
+
 
 def setup_logging(verbose: bool = False, quiet: bool = False):
     """
@@ -142,9 +153,14 @@ class DependencyChecker:
 
         if not SUMMORA_UTILS_AVAILABLE:
             self.logger.warning("⚠️ Summora utils indisponibles - utilisation fallback")
+            if FALLBACK_STOPWORDS_AVAILABLE:
+                self.logger.info("✅ Fallback stopwords disponible")
+            else:
+                self.logger.warning("⚠️ Fallback stopwords aussi indisponible")
 
         # Log des fonctionnalités disponibles
         available_features = []
+
         if YAKE_AVAILABLE:
             available_features.append("YAKE")
         if SKLEARN_AVAILABLE:
@@ -155,27 +171,59 @@ class DependencyChecker:
         if available_features:
             self.logger.info(f"✅ Fonctionnalités disponibles: {', '.join(available_features)}")
 
-        # Suggestion d'installation
-        if missing_deps:
-            deps_str = " ".join(missing_deps)
-            self.logger.info(f"🔧 Installation suggérée: pip install {deps_str}")
-            self.logger.info("📋 Ou utilisez: pip install -r requirements.txt")
 
         return missing_deps
 
     def get_stopwords(self) -> set:
-        """Retourne les stopwords appropriés."""
-        if SUMMORA_UTILS_AVAILABLE:
-            return get_meeting_stopwords()
-        else:
-            return self._get_fallback_stopwords()
+        """Retourne les stopwords appropriés avec fallaback intelligent"""
 
-    def _get_fallback_stopwords(self) -> set:
-        """Stopwords de fallback si NLTK/Summora indisponibles."""
+        # Priorité 1: Summora utils complet (NLTK + meetings)
+        if SUMMORA_UTILS_AVAILABLE:
+           try:
+               stopwords = get_meeting_stopwords()
+               self.logger.info(f"✅ Stopwords Summora: {len(stopwords)} mots")
+               return stopwords
+           except Exception as e:
+               self.logger.warning(f"Erreur stopwords Summora: {e}")
+
+        # Priorité 2: Module spécialisé fallback
+        if FALLBACK_STOPWORDS_AVAILABLE:
+            try:
+                from src.core.utils_stopwords_meeting_fr import get_fallback_stopwords_fr
+                stopwords = get_fallback_stopwords_fr()
+                self.logger.info(f"✅ Stopwords fallback spécialisés: {len(stopwords)} mots")
+                return stopwords
+            except Exception as e:
+                self.logger.warning(f"Erreur stopwords fallback: {e}")
+
+        # Priorité 3: NLTK seul
+        if NLTK_AVAILABLE:
+            try:
+                from nltk.corpus import stopwords
+                french_stopwords = set(stopwords.words('french'))
+                self.logger.info(f"✅ Stopwords NLTK français: {len(french_stopwords)} mots")
+                return french_stopwords
+            except Exception as e:
+                self.logger.warning(f"Erreur stopwords NLTK: {e}")
+
+        # Priorité 4: (dernier recours) Fallback minimal
+        self.logger.warning("⚠️ Utilisation fallback minimal - qualité topics dégradée")
+        return self._get_minimal_fallback_stopwords()
+
+    def _get_minimal_fallback_stopwords(self) -> set:
+        """Fallback minimal en dernier recours."""
+
         return {
-            'le', 'de', 'et', 'à', 'un', 'il', 'être', 'et', 'en', 'avoir', 'que', 'pour',
-            'dans', 'ce', 'son', 'une', 'sur', 'avec', 'ne', 'se', 'pas', 'tout', 'plus',
-            'par', 'grand', 'donc', 'alors', 'bien', 'très', 'où', 'du', 'quand', 'mais'
+            # Essentiels français
+            'le', 'de', 'et', 'à', 'un', 'il', 'être', 'en', 'avoir', 'que', 'pour',
+            'dans', 'ce', 'son', 'une', 'sur', 'avec', 'ne', 'se', 'pas', 'tout',
+
+            # Contractions critiques
+            "c'est", "qu'il", "j'ai", "qu'on", "bon", "oui", "non", "bien", "fin",
+
+            # Connecteurs meetings
+            "donc", "alors", "voici", "voilà", "enfin", "bref"
+
         }
 
 class TopicExtractor:
