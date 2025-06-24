@@ -119,6 +119,7 @@ class MeetingTranscriber:
 
     # === Analyse du contenu transcrit ===
 
+
     def _analyze_meeting_content(self, text: str, segments: List[Dict]) -> Dict:
         """
         Analyse le contenu transcrit pour extraire des métriques meeting.
@@ -127,42 +128,41 @@ class MeetingTranscriber:
             text: Texte transcrit
             segments: Segments Whisper avec timestamps
 
-        Returns:
-            Dict: Métriques spécifiques aux meetings (densité, structure, counts par type)
+        Retourne:
+            Dict: Métriques spécifiques aux meetings
         """
-        # Définition des catégories de mots-clés spécifique au réunion
-        meeting_keywords = {
-            'action': ['action', 'tâche', 'faire', 'réaliser', 'livrer', 'assigner']
-            ,'decision': ['décision', 'décider', 'valider', 'trancher', 'approuver']
-            ,'planning': ['planning', 'délai', 'échéance', 'deadline', 'calendrier', 'roadmap']
-            ,'question': ['question', 'souci', 'problème', 'blocage', 'difficulté', 'bug']
-            ,'agreement': ['d’accord', 'ok', 'parfait', 'exactement', 'entendu']
-            ,'disagreement': ['non', 'pas d’accord', 'mais', 'cependant', 'toutefois']
-            ,'feedback': ['retour', 'commentaire', 'avis', 'point de vue', 'feedback']
-            ,'next_step': ['prochaine étape', 'suivant', 'ensuite', 'à faire', 'pour la suite']
-            ,'closing': ['en résumé', 'pour conclure', 'synthèse', 'résumé', 'bilan']
-        }
+        # Import vocabulaire business centralisé
+        try:
+            from .business_vocabulary import BUSINESS_KEYWORDS
+            meeting_keywords = BUSINESS_KEYWORDS
+
+        except ImportError:
+            # Vocabulaire de secours
+            meeting_keywords = {
+                'actions': ['action', 'tâche', 'faire', 'réaliser', 'livrer'],
+                'decisions': ['décision', 'décider', 'valider', 'trancher'],
+                'planning': ['planning', 'délai', 'échéance', 'deadline'],
+                # ... autres catégories
+            }
 
         keyword_counts = {}
         text_lower = text.lower()
 
+        # Comptage mots-clés par catégorie
         for category, keywords in meeting_keywords.items():
             count = sum(text_lower.count(keyword) for keyword in keywords)
             keyword_counts[category] = count
 
-        # Calcul de la "meeting density" (richesse du contenu)
+        # Calcul densité meeting
         total_keywords = sum(keyword_counts.values())
         word_count = len(text.split())
         meeting_density = (total_keywords / word_count * 100) if word_count > 0 else 0
 
-        # Détection de structure meeting
-        has_structure = any([
-            'ordre du jour' in text_lower,
-            'agenda' in text_lower,
-            'point suivant' in text_lower,
-            'première partie' in text_lower,
-            'pour conclure' in text_lower
-        ])
+        # Détection structure meeting
+        structure_indicators = [
+            'ordre du jour', 'agenda', 'point suivant', 'pour conclure'
+        ]
+        has_structure = any(indicator in text_lower for indicator in structure_indicators)
 
         return {
             'keyword_counts': keyword_counts,

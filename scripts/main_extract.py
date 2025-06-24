@@ -350,36 +350,40 @@ class ActionDecisionDetector:
         self.config = config
         self.logger = logging.getLogger(__name__)
 
-        #Keywords pour les réunions
-        self.meeting_keywords = {
-            'action': [
+        # Import vocabulaire business centralisé
+        try:
+            import sys
+            from pathlib import Path
+            if str(Path(__file__).parent.parent.parent) not in sys.path:
+                sys.path.append(str(Path(__file__).parent.parent.parent))
+
+            from src.core.business_vocabulary import BUSINESS_KEYWORDS
+            self.meeting_keywords = BUSINESS_KEYWORDS
+            self.logger.info(f"📋 Vocabulaire business: {len(BUSINESS_KEYWORDS)} catégories")
+
+        except ImportError as e:
+            self.logger.warning(f"⚠️ Import vocabulaire centralisé échoué: {e}")
+            self.meeting_keywords = self._get_fallback_keywords()
+
+    def _get_fallback_keywords(self) -> dict:
+        """Keywords de secours si module centralisé indisponible."""
+        return {
+            'actions': [
                 'action', 'tâche', 'faire', 'réaliser', 'livrer', 'assigner',
                 'responsable', 'charge de', 'doit', 'va faire', 'prendre en charge',
                 'todo', 'à faire', 'next step', 'prochaine étape'
             ],
-            'decision': [
+            'decisions': [
                 'décision', 'décider', 'valider', 'approuver', 'trancher',
                 'choix', 'opter pour', 'retenir', 'adopter', 'accepter',
                 'refuser', 'rejeter', 'arbitrage', 'conclusion'
-            ],
-            'planning': [
-                'planning', 'délai', 'échéance', 'deadline', 'calendrier',
-                'roadmap', 'timeline', 'avant', 'pour le', 'date limite',
-                'livraison', 'fin', 'début', 'lancement'
-            ],
-            'question': [
-                'question', 'souci', 'problème', 'blocage', 'difficulté',
-                'bug', 'issue', 'point bloquant', 'interrogation', 'clarification'
-            ],
-            'agreement': [
-                'd\'accord', 'ok', 'parfait', 'exactement', 'entendu',
-                'validé', 'approuvé', 'c\'est bon', 'ça marche', 'deal'
             ]
+            # ... autres catégories
         }
 
     def detect_actions_decisions(self, text: str) -> Tuple[List[Dict], List[Dict]]:
         """
-        Détecte les actions et décisions dans la transcription de la réunion.
+        Détecte les actions et décisions dans la transcription.
 
         Args:
             text: Transcription à analyser
@@ -390,7 +394,7 @@ class ActionDecisionDetector:
         actions = []
         decisions = []
 
-        #Tokenisation en phrases
+        # Tokenisation en phrases
         if NLTK_AVAILABLE:
             sentences = sent_tokenize(text, language='french')
         else:
@@ -399,10 +403,12 @@ class ActionDecisionDetector:
         for i, sentence in enumerate(sentences):
             sentence_lower = sentence.lower()
 
-            #Détection d'actions
+            # Détection d'actions
             action_score = 0
             action_matches = []
-            for keyword in self.meeting_keywords['action']:
+            action_keywords = self.meeting_keywords.get('actions', [])
+
+            for keyword in action_keywords:
                 if keyword in sentence_lower:
                     action_score += 1
                     action_matches.append(keyword)
@@ -416,10 +422,12 @@ class ActionDecisionDetector:
                     'type': 'action'
                 })
 
-            #Détection de décisions
+            # Détection de décisions
             decision_score = 0
             decision_matches = []
-            for keyword in self.meeting_keywords['decision']:
+            decision_keywords = self.meeting_keywords.get('decisions', [])
+
+            for keyword in decision_keywords:
                 if keyword in sentence_lower:
                     decision_score += 1
                     decision_matches.append(keyword)
@@ -435,6 +443,36 @@ class ActionDecisionDetector:
 
         self.logger.info(f"Détection: {len(actions)} actions, {len(decisions)} décisions")
         return actions, decisions
+
+    def get_available_categories(self) -> List[str]:
+        """
+        Retourne les catégories disponibles dans le vocabulaire.
+
+        Retourne:
+            List[str]: Liste des catégories business
+        """
+        return list(self.meeting_keywords.keys())
+
+    def analyze_keyword_distribution(self, text: str) -> Dict[str, int]:
+        """
+        Analyse la répartition des mots-clés par catégorie.
+
+        Args:
+            text: Texte à analyser
+
+        Retourne:
+            Dict: Comptage par catégorie
+        """
+        text_lower = text.lower()
+        distribution = {}
+
+        for category, keywords in self.meeting_keywords.items():
+            count = 0
+            for keyword in keywords:
+                count += text_lower.count(keyword)
+            distribution[category] = count
+
+        return distribution
 
 class BusinessMetricsCalculator:
     """Calculateur de métriques business spécialisé"""
