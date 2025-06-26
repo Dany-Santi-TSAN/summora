@@ -9,6 +9,12 @@ __pycache__/
 # Dossier
 data/
 output/
+*.json
+
+# Clé
+keys/
+*.pem
+*.ppk
 
 # Métadonnées windows
 *:Zone.Identifier
