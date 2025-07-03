@@ -4,6 +4,13 @@ torch>=2.0.0
 torchaudio>=2.0.0
 transformers>=4.30.0
 
+# Métrique
+pytest>=8.4.0
+evaluate>=0.4.0
+jiwer>=4.0.0
+datasets>=2.12.0
+rapidfuzz>=3.13.0
+
 #Stat
 scipy==1.14.0
 

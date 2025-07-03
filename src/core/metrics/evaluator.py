@@ -1,15 +1,6 @@
 """
-Orchestrateur d’évaluation pour l’analyse multi-métriques en NLP.
-
-Ce module centralise la logique d’évaluation via une interface unifiée
-(BaseMetric) pour chaque métrique implémentée (WER, ROUGE, à venir etc.).
-
-Fonctionnalités :
-- Appel centralisé des métriques
-- Agrégation des résultats
-- Couches d’interprétation adaptées aux besoins métiers
-
-Modulaire, extensible, et compatible avec les sorties NLP extractives ou génératives.
+Orchestrateur d'évaluation modulaire pour Summora.
+Architecture séparée : Primary + Experimental + Aggregator.
 """
 
 import time
@@ -18,334 +9,433 @@ from typing import Dict, List, Optional
 from dataclasses import dataclass
 
 from .base import BaseMetric, MetricResult
-from .wer import BusinessWERCalculator
-from .rouge import BusinessROUGECalculator
+from .wer import WERCalculator
+from .cer import CERCalculator
+from .bertscore import BERTScoreCalculator
+from .per import PERCalculator
+from .semdist import SemDistCalculator
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class EvaluationReport:
-    """Rapport d'évaluation WER + ROUGE."""
-    wer_result: MetricResult
-    rouge_result: MetricResult
-    composite_score: float
-    business_quality_grade: str
-    recommendations: List[str]
-    processing_time_total: float
+    """Rapport d'évaluation complet Primary + Experimental."""
 
-class BusinessMetricsEvaluator:
-    """Orchestrateur WER + ROUGE pour évaluation qualité business."""
+    # Primary Metrics (Production)
+    wer_result: MetricResult = None
+    cer_result: MetricResult = None
+    bert_result: MetricResult = None
 
-    def __init__(self, business_vocab: set, business_keywords: Dict[str, List[str]]):
-        self.business_vocab = business_vocab
-        self.business_keywords = business_keywords
-        self.logger = logging.getLogger(__name__)
+    # Experimental Metrics (R&D)
+    per_result: MetricResult = None
+    semdist_result: MetricResult = None
 
-        # Initialisation calculateurs essentiels
-        self.wer_calculator = BusinessWERCalculator(business_vocab, business_keywords)
-        self.rouge_calculator = BusinessROUGECalculator(business_vocab)
+    # Scores consolidés
+    primary_composite_score: float = 0.0
+    experimental_composite_score: float = 0.0
+    overall_grade: str = "D"
 
-        self.logger.info("🎯 Evaluator WER+ROUGE initialisé")
+    # Méta
+    recommendations: List[str] = None
+    processing_time_total: float = 0.0
+    metrics_used: List[str] = None
 
-    def evaluate(self, reference: str, hypothesis: str,
-                include_rouge: bool = True) -> EvaluationReport:
+    def __post_init__(self):
+        if self.recommendations is None:
+            self.recommendations = []
+        if self.metrics_used is None:
+            self.metrics_used = []
+
+class PrimaryMetricsEvaluator:
+    """
+    Évaluateur Primary Metrics - Production ready.
+    CER + WER + BERTScore pour usage professionnel.
+    """
+
+    def __init__(self, business_vocab=None):
         """
-        Évaluation WER + ROUGE pour qualité transcription.
+        Initialise l'évaluateur Primary.
+
+        Args:
+            business_vocab: Vocabulaire métier optionnel
+        """
+        self.business_vocab = business_vocab or set()
+
+        # Primary Metrics
+        self.wer_calculator = WERCalculator(business_vocab)
+        self.cer_calculator = CERCalculator(business_vocab)
+        self.bert_calculator = BERTScoreCalculator(business_vocab)
+
+        logger.info("📊 PrimaryMetricsEvaluator initialisé (CER + WER + BERT)")
+
+    def evaluate(self, reference: str, hypothesis: str) -> Dict[str, MetricResult]:
+        """
+        Évaluation des métriques Primary.
 
         Args:
             reference: Texte de référence (ground truth)
-            hypothesis: Texte généré (Whisper)
-            include_rouge: Inclure ROUGE (True par défaut)
+            hypothesis: Texte transcrit (Whisper)
 
-        Returns:
-            EvaluationReport: Rapport avec WER + ROUGE
+        Retourne:
+            Dict: Résultats des métriques primary
+        """
+        logger.debug("📊 Évaluation Primary Metrics")
+
+        results = {}
+
+        # CER
+        try:
+            results['cer'] = self.cer_calculator.calculate(reference, hypothesis)
+            logger.debug(f"✅ CER: {results['cer'].score:.3f}")
+        except Exception as e:
+            logger.error(f"❌ Erreur CER: {e}")
+            results['cer'] = self._error_result("cer", e)
+
+        # WER
+        try:
+            results['wer'] = self.wer_calculator.calculate(reference, hypothesis)
+            logger.debug(f"✅ WER: {results['wer'].score:.3f}")
+        except Exception as e:
+            logger.error(f"❌ Erreur WER: {e}")
+            results['wer'] = self._error_result("wer", e)
+
+        # BERTScore
+        try:
+            results['bert'] = self.bert_calculator.calculate(reference, hypothesis)
+            logger.debug(f"✅ BERT: {results['bert'].score:.3f}")
+        except Exception as e:
+            logger.error(f"❌ Erreur BERT: {e}")
+            results['bert'] = self._error_result("bert", e)
+
+        return results
+
+    def calculate_composite_score(self, results: Dict[str, MetricResult]) -> float:
+        """
+        Calcule score composite Primary.
+
+        Pondération: CER 40% + WER 40% + BERT 20%
+        """
+        scores = []
+        weights = []
+
+        # CER (inversé car erreur)
+        if 'cer' in results and results['cer'].score is not None:
+            scores.append(1.0 - min(1.0, results['cer'].score))
+            weights.append(0.4)
+
+        # WER (inversé car erreur)
+        if 'wer' in results and results['wer'].score is not None:
+            scores.append(1.0 - min(1.0, results['wer'].score))
+            weights.append(0.4)
+
+        # BERT (score direct)
+        if 'bert' in results and results['bert'].score is not None:
+            scores.append(results['bert'].score)
+            weights.append(0.2)
+
+        if not scores:
+            return 0.0
+
+        # Moyenne pondérée normalisée
+        weighted_sum = sum(s * w for s, w in zip(scores, weights))
+        total_weight = sum(weights)
+
+        return weighted_sum / total_weight if total_weight > 0 else 0.0
+
+    def _error_result(self, metric_name: str, error: Exception) -> MetricResult:
+        """Crée un MetricResult d'erreur standardisé."""
+        result = MetricResult()
+        result.metric_name = metric_name
+        result.score = 1.0  # Score d'erreur max
+        result.processing_time = 0.0
+        result.business_focused = bool(self.business_vocab)
+        result.details = {"error": str(error)}
+        return result
+
+class ExperimentalMetricsEvaluator:
+    """
+    Évaluateur Experimental Metrics - R&D.
+    PER + SemDist pour recherche et optimisation.
+    """
+
+    def __init__(self, business_vocab=None):
+        """
+        Initialise l'évaluateur Experimental.
+
+        Args:
+            business_vocab: Vocabulaire métier optionnel
+        """
+        self.business_vocab = business_vocab or set()
+
+        # Experimental Metrics
+        self.per_calculator = PERCalculator(business_vocab)
+        self.semdist_calculator = SemDistCalculator(business_vocab)
+
+        logger.info("🧪 ExperimentalMetricsEvaluator initialisé (PER + SemDist)")
+
+    def evaluate(self, reference: str, hypothesis: str) -> Dict[str, MetricResult]:
+        """
+        Évaluation des métriques Experimental.
+
+        Args:
+            reference: Texte de référence (ground truth)
+            hypothesis: Texte transcrit (Whisper)
+
+        Retourne:
+            Dict: Résultats des métriques experimental
+        """
+        logger.debug("🧪 Évaluation Experimental Metrics")
+
+        results = {}
+
+        # PER
+        try:
+            results['per'] = self.per_calculator.calculate(reference, hypothesis)
+            logger.debug(f"✅ PER: {results['per'].score:.3f}")
+        except Exception as e:
+            logger.error(f"❌ Erreur PER: {e}")
+            results['per'] = self._error_result("per", e)
+
+        # SemDist
+        try:
+            results['semdist'] = self.semdist_calculator.calculate(reference, hypothesis)
+            logger.debug(f"✅ SemDist: {results['semdist'].score:.3f}")
+        except Exception as e:
+            logger.error(f"❌ Erreur SemDist: {e}")
+            results['semdist'] = self._error_result("semdist", e)
+
+        return results
+
+    def calculate_composite_score(self, results: Dict[str, MetricResult]) -> float:
+        """
+        Calcule score composite Experimental.
+
+        Pondération: PER 50% + SemDist 50%
+        """
+        scores = []
+        weights = []
+
+        # PER (inversé car erreur)
+        if 'per' in results and results['per'].score is not None:
+            scores.append(1.0 - min(1.0, results['per'].score))
+            weights.append(0.5)
+
+        # SemDist (inversé car distance)
+        if 'semdist' in results and results['semdist'].score is not None:
+            scores.append(1.0 - min(1.0, results['semdist'].score))
+            weights.append(0.5)
+
+        if not scores:
+            return 0.0
+
+        # Moyenne pondérée
+        weighted_sum = sum(s * w for s, w in zip(scores, weights))
+        total_weight = sum(weights)
+
+        return weighted_sum / total_weight if total_weight > 0 else 0.0
+
+    def _error_result(self, metric_name: str, error: Exception) -> MetricResult:
+        """Crée un MetricResult d'erreur standardisé."""
+        result = MetricResult()
+        result.metric_name = metric_name
+        result.score = 1.0  # Score d'erreur max
+        result.processing_time = 0.0
+        result.business_focused = bool(self.business_vocab)
+        result.details = {"error": str(error)}
+        return result
+
+class SummoraEvaluator:
+    """
+    Aggregateur Principal - Combine Primary + Experimental.
+    Interface unifiée pour évaluation complète.
+    """
+
+    def __init__(self, business_vocab=None):
+        """
+        Initialise l'aggregateur Summora.
+
+        Args:
+            business_vocab: Vocabulaire métier optionnel
+        """
+        self.business_vocab = business_vocab or set()
+
+        # Évaluateurs spécialisés
+        self.primary_evaluator = PrimaryMetricsEvaluator(business_vocab)
+        self.experimental_evaluator = ExperimentalMetricsEvaluator(business_vocab)
+
+        logger.info("🎯 SummoraEvaluator initialisé (Primary + Experimental)")
+
+    def evaluate_complete(self, reference: str, hypothesis: str,
+                         include_experimental: bool = True) -> EvaluationReport:
+        """
+        Évaluation complète Primary + Experimental.
+
+        Args:
+            reference: Texte de référence (ground truth)
+            hypothesis: Texte transcrit (Whisper)
+            include_experimental: Inclure métriques experimental
+
+        Retourne:
+            EvaluationReport: Rapport complet d'évaluation
         """
         start_time = time.time()
 
-        self.logger.info("🔬 Évaluation WER + ROUGE business")
+        logger.info("🔬 Évaluation complète Summora")
 
-        # Calcul WER (obligatoire)
-        try:
-            wer_result = self.wer_calculator.calculate(reference, hypothesis)
-            self.logger.info(f"✅ WER: {wer_result.score:.3f} ({wer_result.processing_time:.2f}s)")
-        except Exception as e:
-            self.logger.error(f"❌ Erreur WER: {e}")
-            wer_result = MetricResult(
-                metric_name="business_wer",
-                score=1.0,  # WER max en cas d'erreur
-                processing_time=0.0,
-                details={"error": str(e)},
-                business_focused=True
-            )
+        # Primary Metrics
+        primary_results = self.primary_evaluator.evaluate(reference, hypothesis)
+        primary_score = self.primary_evaluator.calculate_composite_score(primary_results)
 
-        # Calcul ROUGE (optionnel)
-        if include_rouge:
-            try:
-                rouge_result = self.rouge_calculator.calculate(reference, hypothesis)
-                self.logger.info(f"✅ ROUGE: {rouge_result.score:.3f} ({rouge_result.processing_time:.2f}s)")
-            except Exception as e:
-                self.logger.error(f"❌ Erreur ROUGE: {e}")
-                rouge_result = MetricResult(
-                    metric_name="business_rouge",
-                    score=0.0,
-                    processing_time=0.0,
-                    details={"error": str(e)},
-                    business_focused=True
-                )
-        else:
-            # ROUGE désactivé
-            rouge_result = MetricResult(
-                metric_name="business_rouge",
-                score=0.0,
-                processing_time=0.0,
-                details={"status": "disabled"},
-                business_focused=True
-            )
+        # Experimental Metrics (optionnel)
+        experimental_results = {}
+        experimental_score = 0.0
+        if include_experimental:
+            experimental_results = self.experimental_evaluator.evaluate(reference, hypothesis)
+            experimental_score = self.experimental_evaluator.calculate_composite_score(experimental_results)
 
-        # Score composite WER + ROUGE
-        composite_score = self._calculate_composite_score(wer_result, rouge_result, include_rouge)
-
-        # Grade qualité
-        grade = self._calculate_quality_grade(composite_score, wer_result)
+        # Grade global
+        overall_grade = self._calculate_overall_grade(primary_score, experimental_score)
 
         # Recommandations
-        recommendations = self._generate_recommendations(wer_result, rouge_result, composite_score)
+        recommendations = self._generate_recommendations(
+            primary_results, experimental_results, primary_score
+        )
+
+        # Métriques utilisées
+        metrics_used = list(primary_results.keys())
+        if include_experimental:
+            metrics_used.extend(experimental_results.keys())
 
         total_time = time.time() - start_time
 
         return EvaluationReport(
-            wer_result=wer_result,
-            rouge_result=rouge_result,
-            composite_score=composite_score,
-            business_quality_grade=grade,
+            # Primary
+            wer_result=primary_results.get('wer'),
+            cer_result=primary_results.get('cer'),
+            bert_result=primary_results.get('bert'),
+            # Experimental
+            per_result=experimental_results.get('per'),
+            semdist_result=experimental_results.get('semdist'),
+            # Consolidé
+            primary_composite_score=primary_score,
+            experimental_composite_score=experimental_score,
+            overall_grade=overall_grade,
             recommendations=recommendations,
-            processing_time_total=total_time
+            processing_time_total=total_time,
+            metrics_used=metrics_used
         )
 
-    def _calculate_composite_score(self, wer_result: MetricResult, rouge_result: MetricResult,
-                                 include_rouge: bool) -> float:
-        """
-        Calcule score composite WER + ROUGE.
+    def _calculate_overall_grade(self, primary_score: float, experimental_score: float) -> str:
+        """Calcule grade global basé sur primary + experimental."""
 
-        Pondération:
-        - WER: 70% (métrique principale)
-        - ROUGE: 30% (métrique secondaire)
-        """
-        # WER inversé pour score positif (1 = parfait, 0 = mauvais)
-        if hasattr(wer_result, 'business_wer'):
-            wer_score = 1 - wer_result.business_wer
+        # Grade basé principalement sur primary (70%) + experimental (30%)
+        if experimental_score > 0:
+            overall_score = (primary_score * 0.7) + (experimental_score * 0.3)
         else:
-            wer_score = 1 - wer_result.score
+            overall_score = primary_score
 
-        if include_rouge and rouge_result.score > 0:
-            # Score pondéré WER 70% + ROUGE 30%
-            composite = (wer_score * 0.7) + (rouge_result.score * 0.3)
+        # Grading
+        if overall_score >= 0.90:
+            return "A+"
+        elif overall_score >= 0.80:
+            return "A"
+        elif overall_score >= 0.70:
+            return "B"
+        elif overall_score >= 0.60:
+            return "C"
         else:
-            # WER uniquement
-            composite = wer_score
+            return "D"
 
-        return max(0.0, min(1.0, composite))  # Clamp entre 0 et 1
-
-    def _calculate_quality_grade(self, composite_score: float, wer_result: MetricResult) -> str:
-        """Calcule grade qualité business basé sur score composite."""
-
-        # Grading adapté business
-        if composite_score >= 0.85:
-            return "A+"  # Excellent
-        elif composite_score >= 0.75:
-            return "A"   # Très bon
-        elif composite_score >= 0.65:
-            return "B"   # Bon
-        elif composite_score >= 0.50:
-            return "C"   # Acceptable
-        else:
-            return "D"   # Insuffisant
-
-    def _generate_recommendations(self, wer_result: MetricResult, rouge_result: MetricResult,
-                                composite_score: float) -> List[str]:
-        """Génère recommandations basées sur WER + ROUGE."""
+    def _generate_recommendations(self, primary_results: Dict,
+                                experimental_results: Dict,
+                                primary_score: float) -> List[str]:
+        """Génère recommandations basées sur toutes les métriques."""
         recommendations = []
 
-        # Analyse WER (priorité)
-        if hasattr(wer_result, 'business_wer'):
-            business_wer = wer_result.business_wer
+        # Analyse Primary
+        if 'cer' in primary_results:
+            cer_score = primary_results['cer'].score
+            if cer_score > 0.3:
+                recommendations.append("🔴 CER élevé (>30%): problèmes majeurs transcription")
+            elif cer_score > 0.15:
+                recommendations.append("🟡 CER moyen: optimiser qualité audio")
 
-            if business_wer > 0.5:
-                recommendations.append("WER business très élevé (>50%): modèle Whisper inadapté, passer à Large")
-            elif business_wer > 0.3:
-                recommendations.append("WER business élevé (>30%): considérer modèle Whisper plus performant")
-            elif business_wer > 0.15:
-                recommendations.append("WER business moyen: optimiser prompt ou qualité audio")
-            else:
-                recommendations.append("WER business excellent: qualité de transcription optimale")
+        if 'wer' in primary_results:
+            wer_score = primary_results['wer'].score
+            if wer_score > 0.4:
+                recommendations.append("🔴 WER élevé (>40%): modèle Whisper inadapté")
+            elif wer_score > 0.2:
+                recommendations.append("🟡 WER moyen: considérer Whisper plus large")
 
-            # Préservation vocabulaire business
-            if hasattr(wer_result, 'business_preservation_rate'):
-                preservation = wer_result.business_preservation_rate
-                if preservation < 0.6:
-                    recommendations.append("Préservation vocabulaire faible (<60%): améliorer contexte métier")
-                elif preservation < 0.8:
-                    recommendations.append("Préservation vocabulaire moyenne: optimiser prompt business")
+        # Analyse Experimental
+        if 'per' in experimental_results:
+            per_score = experimental_results['per'].score
+            if per_score < 0.2:
+                recommendations.append("🟢 PER excellent: phonétique préservée")
+            elif per_score > 0.5:
+                recommendations.append("🔍 PER élevé: erreurs phonétiques importantes")
 
-        # Analyse ROUGE (secondaire)
-        if rouge_result.score > 0:  # ROUGE activé
-            if rouge_result.score < 0.4:
-                recommendations.append("Score ROUGE faible (<40%): problème cohérence du contenu")
-            elif rouge_result.score < 0.6:
-                recommendations.append("Score ROUGE moyen: améliorer structure du discours")
+        if 'semdist' in experimental_results:
+            semdist_score = experimental_results['semdist'].score
+            if semdist_score < 0.3:
+                recommendations.append("🟢 SemDist excellent: sens préservé")
+            elif semdist_score > 0.6:
+                recommendations.append("🔍 SemDist élevé: sens altéré")
 
-        # Évaluation globale
-        if composite_score < 0.5:
-            recommendations.append("🔴 Qualité globale insuffisante: pipeline nécessite optimisation majeure")
-        elif composite_score < 0.7:
-            recommendations.append("🟡 Qualité moyenne: améliorations recommandées pour usage professionnel")
-        elif composite_score >= 0.8:
-            recommendations.append("🟢 Excellente qualité: pipeline prêt pour production business")
+        # Recommandation globale
+        if primary_score < 0.6:
+            recommendations.append("💡 Score primary faible: optimisation majeure requise")
+        elif primary_score >= 0.8:
+            recommendations.append("🚀 Score primary excellent: prêt production")
 
-        return recommendations if recommendations else ["Qualité satisfaisante pour usage courant"]
+        return recommendations or ["Qualité globale satisfaisante"]
 
     def compare_models(self, reference: str, transcriptions: Dict[str, str],
-                      include_rouge: bool = True) -> Dict[str, EvaluationReport]:
-        """
-        Compare plusieurs transcriptions (modèles Whisper différents).
-
-        Args:
-            reference: Texte de référence
-            transcriptions: Dict {model_name: transcription}
-            include_rouge: Inclure ROUGE dans comparaison
-
-        Returns:
-            Dict: Rapports d'évaluation par modèle
-        """
-        self.logger.info(f"🔀 Comparaison {len(transcriptions)} modèles Whisper")
+                      include_experimental: bool = True) -> Dict[str, EvaluationReport]:
+        """Compare plusieurs modèles Whisper."""
+        logger.info(f"🔀 Comparaison {len(transcriptions)} modèles")
 
         reports = {}
         for model_name, transcription in transcriptions.items():
-            self.logger.info(f"📊 Évaluation {model_name}...")
-            reports[model_name] = self.evaluate(reference, transcription, include_rouge)
+            logger.info(f"📊 Évaluation {model_name}...")
+            reports[model_name] = self.evaluate_complete(
+                reference, transcription, include_experimental
+            )
 
         return reports
 
     def get_best_model(self, comparison_reports: Dict[str, EvaluationReport]) -> tuple[str, float]:
-        """
-        Détermine le meilleur modèle basé sur score composite.
-
-        Args:
-            comparison_reports: Rapports de comparaison
-
-        Returns:
-            tuple: (nom_meilleur_modèle, score_composite)
-        """
+        """Détermine le meilleur modèle basé sur score primary."""
         if not comparison_reports:
             return "unknown", 0.0
 
-        best_model, best_report = max(comparison_reports.items(),
-                                     key=lambda x: x[1].composite_score)
+        best_model, best_report = max(
+            comparison_reports.items(),
+            key=lambda x: x[1].primary_composite_score
+        )
 
-        best_score = best_report.composite_score
-        self.logger.info(f"🏆 Meilleur modèle: {best_model} (score: {best_score:.3f}, grade: {best_report.business_quality_grade})")
+        best_score = best_report.primary_composite_score
+        logger.info(f"🏆 Meilleur: {best_model} (primary: {best_score:.3f})")
 
         return best_model, best_score
 
-    def get_wer_only(self, reference: str, hypothesis: str) -> float:
-        """
-        Évaluation WER uniquement (rapide).
-
-        Args:
-            reference: Texte de référence
-            hypothesis: Texte transcrit
-
-        Returns:
-            float: WER business (0.0 = parfait, 1.0 = totalement faux)
-        """
-        try:
-            wer_result = self.wer_calculator.calculate(reference, hypothesis)
-            if hasattr(wer_result, 'business_wer'):
-                return wer_result.business_wer
-            else:
-                return wer_result.score
-        except Exception as e:
-            self.logger.error(f"❌ Erreur WER rapide: {e}")
-            return 1.0  # WER maximum en cas d'erreur
-
 # === Factory function ===
 
-def create_business_evaluator(business_vocab: Optional[set] = None,
-                            business_keywords: Optional[Dict[str, List[str]]] = None) -> BusinessMetricsEvaluator:
+def create_summora_evaluator(business_vocab: Optional[set] = None) -> SummoraEvaluator:
     """
-    Factory pour créer évaluateur WER+ROUGE avec vocabulaire centralisé.
+    Factory pour créer évaluateur Summora complet.
 
     Args:
-        business_vocab: Vocabulaire business (auto-import si None)
-        business_keywords: Keywords par catégorie (auto-import si None)
+        business_vocab: Vocabulaire métier (défaut: meeting)
 
-    Returns:
-        BusinessMetricsEvaluator: Instance configurée
+    Retourne:
+        SummoraEvaluator: Instance configurée
     """
-    if business_vocab is None or business_keywords is None:
-        try:
-            from ..business_vocabulary import get_all_business_keywords, BUSINESS_KEYWORDS
-            business_vocab = business_vocab or get_all_business_keywords()
-            business_keywords = business_keywords or BUSINESS_KEYWORDS
-        except ImportError:
-            logger = logging.getLogger(__name__)
-            logger.warning("⚠️ Import vocabulaire centralisé échoué - fallback minimal")
-            business_vocab = set(['action', 'décision', 'budget', 'planning'])
-            business_keywords = {'actions': ['action'], 'decisions': ['décision']}
+    if business_vocab is None:
+        # Vocabulaire par défaut meeting
+        business_vocab = {
+            'budget', 'planning', 'action', 'decision', 'meeting',
+            'deadline', 'validation', 'objectif', 'strategie'
+        }
 
-    return BusinessMetricsEvaluator(business_vocab, business_keywords)
-
-# === Usage examples ===
-
-def example_single_evaluation():
-    """Exemple évaluation simple WER + ROUGE."""
-    evaluator = create_business_evaluator()
-
-    reference = "Nous validons le budget pour ce projet avec deadline en décembre"
-    hypothesis = "Nous validons le budget pour ce projet avec échéance en décembre"
-
-    # Évaluation complète
-    report = evaluator.evaluate(reference, hypothesis)
-
-    print("📊 ÉVALUATION WER + ROUGE")
-    print(f"Score composite: {report.composite_score:.3f}")
-    print(f"Grade: {report.business_quality_grade}")
-    print(f"WER business: {report.wer_result.score:.3f}")
-    print(f"ROUGE business: {report.rouge_result.score:.3f}")
-    print(f"Recommandations: {report.recommendations}")
-
-def example_model_comparison():
-    """Exemple comparaison modèles."""
-    evaluator = create_business_evaluator()
-
-    reference = "Nous validons le budget pour ce projet avec deadline en décembre"
-    transcriptions = {
-        'tiny': "Nous validons le budget pour ce projet avec dead line en décembre",
-        'base': "Nous validons le budget pour ce projet avec deadline en décembre",
-        'small': "Nous validons le budget pour ce projet avec deadline en décembre"
-    }
-
-    reports = evaluator.compare_models(reference, transcriptions)
-    best_model, best_score = evaluator.get_best_model(reports)
-
-    print("🔀 COMPARAISON MODÈLES")
-    print(f"Meilleur modèle: {best_model} ({best_score:.3f})")
-    print()
-    for model, report in reports.items():
-        wer_score = report.wer_result.score if hasattr(report.wer_result, 'business_wer') else "N/A"
-        print(f"{model:8}: {report.composite_score:.3f} ({report.business_quality_grade}) - WER: {wer_score}")
-
-def example_wer_only():
-    """Exemple WER rapide."""
-    evaluator = create_business_evaluator()
-
-    reference = "Nous validons le budget pour ce projet avec deadline en décembre"
-    hypothesis = "Nous validons le budget pour ce projet avec échéance en décembre"
-
-    wer_score = evaluator.get_wer_only(reference, hypothesis)
-    print(f"WER business uniquement: {wer_score:.3f}")
-
-if __name__ == "__main__":
-    example_single_evaluation()
-    print()
-    example_model_comparison()
-    print()
-    example_wer_only()
+    return SummoraEvaluator(business_vocab)

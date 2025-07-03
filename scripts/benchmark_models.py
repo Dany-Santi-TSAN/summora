@@ -18,7 +18,7 @@ sys.path.append('..')
 # Imports Summora
 from src.core.transcriber import transcribe_meeting_audio
 from src.core.metrics.evaluator import create_business_evaluator
-from src.core.utils import validate_audio_path, format_duration
+from src.core.utils import validate_audio_path
 
 # Ground truth datasets
 GROUND_TRUTH_DATA = {
