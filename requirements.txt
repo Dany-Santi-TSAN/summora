@@ -7,6 +7,8 @@ transformers>=4.30.0
 # Metrics and evaluation
 pytest>=8.4.0
 evaluate>=0.4.0
+sentence-transformers>=2.2.0
+bert-score>=0.3.11
 jiwer>=4.0.0
 rapidfuzz>=3.13.0
 

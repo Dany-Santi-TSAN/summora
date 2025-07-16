@@ -27,8 +27,9 @@ def benchmark_whisper_models():
     # Configuration modèles à tester
     models = ["medium", "large"]
     audio_files = [
-        "data/audio-om-mercato-test.mp3",
-        "data/test-reunion.mp3"
+        #"data/audio-om-mercato-test.mp3",
+        #"data/test-reunion.mp3",
+        "data/podcast_1h.mp3"
     ]
 
     results = {}
