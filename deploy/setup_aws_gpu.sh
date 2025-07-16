@@ -42,7 +42,7 @@ fi
 echo "📦 Mise à jour système..."
 sudo apt update -y
 sudo apt install -y \
-    python3-pip python3-venv git wget curl \
+    python3-pip python3-venv python-is-python3 git wget curl \
     build-essential pkg-config \
     ffmpeg libavcodec-dev libavformat-dev libavutil-dev \
     htop tree unzip
