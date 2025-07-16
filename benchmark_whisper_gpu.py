@@ -98,6 +98,13 @@ def benchmark_whisper_models():
 
             model_results[Path(audio_file).name] = file_results
 
+            # Sauvegarde transcription
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"output/transcription_{model_size}_{Path(audio_file).stem}_{timestamp}.txt"
+            with open(filename, 'w', encoding='utf-8') as f:
+                f.write(result['text'])
+            print(f"💾 Transcription sauvée: {filename}")
+
         results[model_size] = model_results
 
     # Comparaison finale
