@@ -11,7 +11,7 @@ import logging
 
 # Import Summora
 from src.core.transcriber import MeetingTranscriber, MeetingTranscriptionConfig
-from src.core.metrics.evaluator import MeetingEvaluator
+from src.core.metrics.evaluator import SummoraEvaluator
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
