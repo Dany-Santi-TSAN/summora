@@ -4,17 +4,16 @@ torch>=2.0.0
 torchaudio>=2.0.0
 transformers>=4.30.0
 
-# Métrique
+# Metrics and evaluation
 pytest>=8.4.0
 evaluate>=0.4.0
 jiwer>=4.0.0
-datasets>=2.12.0
 rapidfuzz>=3.13.0
 
-#Stat
+# Statistical analysis
 scipy==1.14.0
 
-# Dataset handling
+# Dataset and audio handling
 datasets>=2.12.0
 librosa>=0.11.0
 soundfile>=0.12.0
@@ -27,14 +26,13 @@ gensim>=4.3.2
 yake>=0.4.8
 textstat>=0.7.3
 
-# Text processing French
-fr-core-news-sm @ https://github.com/explosion/spacy-models/releases/download/fr_core_news_sm-3.6.0/fr_core_news_sm-3.6.0-py3-none-any.whl
+# Text processing
 regex==2024.11.6
 
 # Utility and visualization
-numpy>=1.17.3,<1.25.0
+numpy>=1.17.3
 pandas>=2.0.0
-matplotlib>=3.10.0
+matplotlib>=3.7.0
 matplotlib-inline>=0.1.7
 matplotlib-venn>=1.1.2
 seaborn>=0.12.0
@@ -45,8 +43,7 @@ fastapi>=0.100.0
 uvicorn>=0.22.0
 python-multipart>=0.0.6
 
-# Development
+# Development tools
 jupyter>=1.0.0
-pytest>=7.4.0
 black>=23.0.0
 flake8>=6.0.0
