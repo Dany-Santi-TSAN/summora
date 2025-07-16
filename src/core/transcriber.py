@@ -23,7 +23,7 @@ class MeetingTranscriptionConfig:
     model_size: str = "base"
     language: str = "fr"
     task: str = "transcribe"
-    word_timestamps: bool = True
+    word_timestamps: bool = False
     verbose: bool = False
     temperature: float = 0.0
     compression_ratio_threshold: float = 2.4

@@ -42,7 +42,7 @@ def benchmark_whisper_models():
             model_size=model_size,
             language="fr",
             temperature=0.0,
-            word_timestamps=True
+            word_timestamps=False
         )
 
         # Création transcripteur
