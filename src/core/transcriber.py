@@ -273,6 +273,15 @@ class MeetingTranscriber:
                 ,initial_prompt=self.config.initial_prompt
             )
 
+            if result.get('duration', 0) == 0:
+                import librosa
+                try:
+                    y, sr = librosa.load(str(audio_path), sr=None)
+                    result['duration'] = len(y) / sr
+                    logger.info(f"🔧 Duration calculée: {result['duration']:.2f}s")
+                except:
+                    result['duration'] = 1.0  # Fallback
+
             end_time = datetime.now()
             processing_time = (end_time - start_time).total_seconds()
 
