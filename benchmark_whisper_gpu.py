@@ -76,7 +76,7 @@ def benchmark_whisper_models():
                     "speaking_rate": result["meeting_confidence"]["speaking_rate"],
                     "meeting_density": result["meeting_content"]["meeting_density"],
                     "text_preview": result["preview"][:100] + "...",
-                    "realtime_factor": processing_time / result["duration"]
+                    "realtime_factor": processing_time / result["duration"] if result["duration"] > 0 else 0.0
                 }
 
                 # Affichage résultats
