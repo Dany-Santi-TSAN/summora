@@ -29,7 +29,8 @@ def benchmark_whisper_models():
     audio_files = [
         #"data/audio-om-mercato-test.mp3",
         #"data/test-reunion.mp3",
-        "data/podcast_1h.mp3"
+        "data/podcast_1h.mp3",
+        "data/meeting_mairie.mp3"
     ]
 
     results = {}
