@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class MeetingTranscriptionConfig:
     """Configuration de Whisper pour la transcription de meetings."""
-    model_size: str = "base"
+    model_size: str = "medium"
     language: str = "fr"
     task: str = "transcribe"
     word_timestamps: bool = False

@@ -1,0 +1,13 @@
+# Summora - Configuration Simple
+model: "medium"
+language: "fr"
+
+# BONUS Features (False par défaut, CŒUR = transcription + extraction)
+enable_spot_check: false
+enable_recommendation: false
+enable_correction: false
+enable_visual: false
+
+# Options avancées
+temperature: 0.0
+min_confidence: 0.7

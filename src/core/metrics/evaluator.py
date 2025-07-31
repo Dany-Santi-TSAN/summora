@@ -8,7 +8,7 @@ import logging
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 
-from .base import BaseMetric, MetricResult
+from .base import MetricResult
 from .wer import WERCalculator
 from .cer import CERCalculator
 from .bertscore import BERTScoreCalculator

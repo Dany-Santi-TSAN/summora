@@ -2,7 +2,8 @@
 """
 Summora - Module de Transcription
 Transcription audio vers texte avec Whisper optimisé meetings
-Usage: python main_transcribe.py audio.mp3 --model small
+Backbone: Medium (défaut) | Fallback: Small
+Usage: python main_transcribe.py audio.mp3 --model medium
 """
 import argparse
 import logging
@@ -11,11 +12,13 @@ from pathlib import Path
 from datetime import datetime
 import json
 import sys
-sys.path.append('..')
+
+# Setup path pour imports Summora
+sys.path.append(str(Path(__file__).parent.parent))
 
 # Imports Summora
 from src.core.transcriber import transcribe_meeting_audio
-from src.core.utils import validate_audio_path, get_supported_formats, format_duration
+from src.core.utils import validate_audio_path, get_supported_formats
 
 def setup_logging(verbose: bool = False, quiet: bool = False):
     """Configure le logging."""
@@ -41,21 +44,89 @@ def format_transcription_time(seconds: float) -> str:
     else:
         return f"{seconds:.1f}s"
 
+def get_optimal_model(audio_path: Path, requested_model: str) -> str:
+    """
+    Détermine le modèle optimal selon la taille du fichier et la demande.
+    Backbone: Medium | Fallback: Small
+    """
+    file_size_mb = audio_path.stat().st_size / (1024 * 1024)
+
+    # Si un modèle spécifique est demandé, on le respecte
+    if requested_model in ["small", "medium", "large"]:
+        return requested_model
+
+    # Sélection automatique selon la taille
+    if file_size_mb > 50:  # > 50MB
+        recommended = "medium"
+        logger = logging.getLogger(__name__)
+        logger.info(f"📊 Fichier volumineux ({file_size_mb:.1f}MB) → Modèle Medium recommandé")
+    elif file_size_mb > 20:  # 20-50MB
+        recommended = "medium"
+        logger = logging.getLogger(__name__)
+        logger.info(f"📊 Fichier moyen ({file_size_mb:.1f}MB) → Modèle Medium optimal")
+    else:  # < 20MB
+        recommended = "small"
+        logger = logging.getLogger(__name__)
+        logger.info(f"📊 Fichier léger ({file_size_mb:.1f}MB) → Modèle Small suffisant")
+
+    return recommended
+
+def transcribe_with_fallback(audio_path: Path, preferred_model: str, language: str, temperature: float) -> dict:
+    """
+    Transcription avec fallback automatique en cas d'erreur.
+    Ordre: Medium → Small → Erreur
+    """
+    logger = logging.getLogger(__name__)
+
+    models_to_try = []
+
+    # Construction de la liste des modèles à tester
+    if preferred_model == "large":
+        models_to_try = ["large", "medium", "small"]
+    elif preferred_model == "medium":
+        models_to_try = ["medium", "small"]
+    else:  # small ou auto
+        models_to_try = ["small"]
+
+    last_error = None
+
+    for model in models_to_try:
+        try:
+            logger.info(f"🎤 Tentative transcription avec modèle '{model}'...")
+
+            result = transcribe_meeting_audio(
+                audio_path,
+                model_size=model,
+                language=language,
+                temperature=temperature
+            )
+
+            if "error" not in result:
+                if model != preferred_model:
+                    logger.warning(f"⚠️ Fallback vers modèle '{model}' (échec '{preferred_model}')")
+                else:
+                    logger.info(f"✅ Transcription réussie avec modèle '{model}'")
+
+                # Ajout info modèle utilisé
+                result["model_used"] = model
+                result["was_fallback"] = (model != preferred_model)
+                return result
+            else:
+                last_error = result
+                logger.warning(f"❌ Modèle '{model}' échoué: {result.get('message', 'Erreur inconnue')}")
+
+        except Exception as e:
+            last_error = {"error": "exception", "message": str(e)}
+            logger.error(f"❌ Exception modèle '{model}': {str(e)}")
+
+    # Tous les modèles ont échoué
+    logger.error("❌ Tous les modèles de transcription ont échoué")
+    return last_error or {"error": "all_models_failed", "message": "Aucun modèle n'a pu traiter ce fichier"}
+
 def save_transcription(transcription_result: dict, audio_path: Path, model: str,
                       processing_time: float, language: str, output_file: str = None) -> str:
     """
     Sauvegarde la transcription dans un fichier texte structuré.
-
-    Args:
-        transcription_result: Résultat de la transcription
-        audio_path: Chemin du fichier audio source
-        model: Modèle Whisper utilisé
-        processing_time: Temps de traitement
-        language: Langue de transcription
-        output_file: Nom du fichier de sortie (optionnel)
-
-    Returns:
-        str: Chemin du fichier sauvegardé
     """
     if output_file:
         save_path = Path(output_file)
@@ -63,11 +134,17 @@ def save_transcription(transcription_result: dict, audio_path: Path, model: str,
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         save_path = Path('output/transcriptions') / (f"transcription_{audio_path.stem}_{model}_{timestamp}.txt")
 
-    # Métadonnées
+    # Créer le répertoire si nécessaire
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Métadonnées enrichies
     metadata = {
         "file_name": audio_path.name,
         "file_path": str(audio_path.absolute()),
+        "file_size_mb": round(audio_path.stat().st_size / (1024 * 1024), 2),
         "model": model,
+        "model_used": transcription_result.get('model_used', model),
+        "was_fallback": transcription_result.get('was_fallback', False),
         "language": language,
         "processing_time": processing_time,
         "processing_time_formatted": format_transcription_time(processing_time),
@@ -80,36 +157,51 @@ def save_transcription(transcription_result: dict, audio_path: Path, model: str,
         "speaking_rate": transcription_result.get('speaking_rate', 0)
     }
 
-    # Écriture du fichier
+    # Écriture du fichier avec header amélioré
     with open(save_path, 'w', encoding='utf-8') as f:
         # Header
         f.write("=" * 70 + "\n")
         f.write("SUMMORA - TRANSCRIPTION MEETING\n")
         f.write("=" * 70 + "\n\n")
 
-        # Métadonnées principales
+        # Informations fichier
         f.write("📁 INFORMATIONS FICHIER\n")
         f.write("-" * 30 + "\n")
         f.write(f"Fichier source    : {metadata['file_name']}\n")
-        f.write(f"Chemin complet    : {metadata['file_path']}\n")
+        f.write(f"Taille fichier    : {metadata['file_size_mb']} MB\n")
         f.write(f"Durée audio       : {metadata['duration']}\n")
         f.write(f"Généré le         : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
 
-        # Métadonnées transcription
+        # Configuration transcription
         f.write("🤖 CONFIGURATION TRANSCRIPTION\n")
         f.write("-" * 35 + "\n")
-        f.write(f"Modèle Whisper    : {metadata['model']}\n")
+        f.write(f"Modèle demandé    : {metadata['model']}\n")
+        f.write(f"Modèle utilisé    : {metadata['model_used']}")
+        if metadata['was_fallback']:
+            f.write(" ⚠️ (fallback)")
+        f.write("\n")
         f.write(f"Langue            : {metadata['language']}\n")
         f.write(f"Temps traitement  : {metadata['processing_time_formatted']}\n\n")
 
         # Métriques qualité
         f.write("📊 MÉTRIQUES QUALITÉ\n")
         f.write("-" * 25 + "\n")
-        f.write(f"Nombre de mots    : {metadata['word_count']}\n")
+        f.write(f"Nombre de mots    : {metadata['word_count']:,}\n")
         f.write(f"Débit parole      : {metadata['speaking_rate']:.1f} mots/min\n")
-        f.write(f"Confiance         : {metadata['confidence']:.3f}\n")
+        f.write(f"Confiance globale : {metadata['confidence']:.3f}\n")
         f.write(f"Grade confiance   : {metadata['confidence_grade']}\n")
-        f.write(f"Densité meeting   : {metadata['meeting_density']:.1f}%\n\n")
+        f.write(f"Densité meeting   : {metadata['meeting_density']:.1f}%\n")
+
+        # Recommandations selon la qualité
+        if metadata['confidence'] >= 0.8:
+            f.write("✅ Excellente qualité de transcription\n")
+        elif metadata['confidence'] >= 0.7:
+            f.write("👍 Bonne qualité de transcription\n")
+        elif metadata['confidence'] >= 0.6:
+            f.write("⚠️ Qualité acceptable - vérifier l'audio\n")
+        else:
+            f.write("❌ Qualité faible - améliorer l'enregistrement\n")
+        f.write("\n")
 
         # Contenu meeting si disponible
         meeting_content = transcription_result.get('meeting_content', {})
@@ -120,7 +212,8 @@ def save_transcription(transcription_result: dict, audio_path: Path, model: str,
             f.write(f"Actions détectées : {keywords.get('action', 0)}\n")
             f.write(f"Décisions         : {keywords.get('decision', 0)}\n")
             f.write(f"Questions         : {keywords.get('question', 0)}\n")
-            f.write(f"Planning          : {keywords.get('planning', 0)}\n\n")
+            f.write(f"Planning          : {keywords.get('planning', 0)}\n")
+            f.write(f"Structure meeting : {'✅' if meeting_content.get('has_structure', False) else '❌'}\n\n")
 
         # Transcription complète
         f.write("📝 TRANSCRIPTION COMPLÈTE\n")
@@ -129,7 +222,7 @@ def save_transcription(transcription_result: dict, audio_path: Path, model: str,
 
         # Footer
         f.write(f"\n\n{'=' * 70}\n")
-        f.write("Généré par Summora - Speech In, Sense Out\n")
+        f.write("Généré par Summora V3 - Speech In, Sense Out\n")
         f.write(f"{'=' * 70}\n")
 
     return str(save_path)
@@ -143,10 +236,13 @@ def save_metadata_json(transcription_result: dict, audio_path: Path, model: str,
         "source": {
             "file_name": audio_path.name,
             "file_path": str(audio_path.absolute()),
+            "file_size_mb": round(audio_path.stat().st_size / (1024 * 1024), 2),
             "duration": transcription_result.get('duration_formatted', 'N/A')
         },
         "transcription": {
-            "model": model,
+            "model_requested": model,
+            "model_used": transcription_result.get('model_used', model),
+            "was_fallback": transcription_result.get('was_fallback', False),
             "language": language,
             "processing_time": processing_time,
             "processing_time_formatted": format_transcription_time(processing_time),
@@ -163,7 +259,8 @@ def save_metadata_json(transcription_result: dict, audio_path: Path, model: str,
             "text": transcription_result.get('text', ''),
             "preview": transcription_result.get('preview', ''),
             "meeting_keywords": transcription_result.get('meeting_content', {}).get('keyword_counts', {})
-        }
+        },
+        "summora_version": "3.0"
     }
 
     with open(metadata_path, 'w', encoding='utf-8') as f:
@@ -174,16 +271,23 @@ def save_metadata_json(transcription_result: dict, audio_path: Path, model: str,
 def print_summary(transcription_result: dict, audio_path: Path, model: str,
                  processing_time: float, show_preview: bool = True, show_full: bool = False):
     """Affiche un résumé des résultats de transcription."""
-    print("\n" + "="*50)
-    print("📝 RÉSUMÉ TRANSCRIPTION SUMMORA")
-    print("="*50)
+    print("\n" + "="*60)
+    print("📝 RÉSUMÉ TRANSCRIPTION SUMMORA V3")
+    print("="*60)
 
-    # Infos générales
+    # Informations générales
     confidence = transcription_result.get('meeting_confidence', {})
-    print(f"📁 Fichier        : {audio_path.name}")
-    print(f"🤖 Modèle         : {model}")
+    file_size_mb = audio_path.stat().st_size / (1024 * 1024)
+
+    print(f"📁 Fichier        : {audio_path.name} ({file_size_mb:.1f}MB)")
+    print(f"🤖 Modèle demandé : {model}")
+
+    model_used = transcription_result.get('model_used', model)
+    was_fallback = transcription_result.get('was_fallback', False)
+    print(f"🤖 Modèle utilisé : {model_used}" + (" ⚠️ (fallback)" if was_fallback else ""))
+
     print(f"⏱️  Temps         : {format_transcription_time(processing_time)}")
-    print(f"📊 Mots           : {transcription_result.get('word_count', 0)}")
+    print(f"📊 Mots           : {transcription_result.get('word_count', 0):,}")
     print(f"🎯 Confiance      : {confidence.get('meeting_confidence', 0):.3f} ({confidence.get('confidence_grade', 'N/A')})")
     print(f"💬 Débit          : {transcription_result.get('speaking_rate', 0):.1f} mots/min")
 
@@ -194,33 +298,50 @@ def print_summary(transcription_result: dict, audio_path: Path, model: str,
         print(f"🔥 Densité meeting: {meeting_content.get('meeting_density', 0):.1f}%")
         print(f"⚡ Actions        : {keywords.get('action', 0)}")
         print(f"✅ Décisions      : {keywords.get('decision', 0)}")
+        print(f"📋 Structure      : {'✅' if meeting_content.get('has_structure', False) else '❌'}")
+
+    # Qualité globale
+    conf_score = confidence.get('meeting_confidence', 0)
+    if conf_score >= 0.8:
+        print("🏆 Qualité: Excellente")
+    elif conf_score >= 0.7:
+        print("👍 Qualité: Bonne")
+    elif conf_score >= 0.6:
+        print("⚠️ Qualité: Acceptable")
+    else:
+        print("❌ Qualité: Faible")
 
     # Aperçu du texte
     if show_full:
         print(f"\n📖 TRANSCRIPTION COMPLÈTE:")
-        print("-" * 50)
+        print("-" * 60)
         print(transcription_result.get('text', ''))
     elif show_preview:
         print(f"\n📖 Aperçu:")
         print(f"'{transcription_result.get('preview', '')}'")
 
-    print("="*50)
+    print("="*60)
 
 def main():
     """
     Point d'entrée principal du module de transcription.
+    Backbone: Medium | Fallback: Small
     """
     parser = argparse.ArgumentParser(
-        description="Summora - Module de Transcription",
+        description="Summora V3 - Module de Transcription (Backbone: Medium)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
     Exemples d'usage:
-    python main_transcribe.py audio.mp3                     # Transcription basique
-    python main_transcribe.py audio.wav --model small       # Modèle spécifique
+    python main_transcribe.py audio.mp3                     # Auto (Medium/Small selon taille)
+    python main_transcribe.py audio.wav --model medium      # Force Medium
+    python main_transcribe.py audio.mp3 --model large       # Force Large (avec fallback)
     python main_transcribe.py audio.mp3 --full-text         # Affichage complet
     python main_transcribe.py audio.mp3 --output result.txt # Fichier personnalisé
     python main_transcribe.py audio.mp3 --no-save --quiet   # Juste la transcription
-    """
+
+    Modèles disponibles: small, medium (défaut), large
+    Note: tiny supprimé (qualité insuffisante pour meetings)
+        """
     )
 
     # Arguments obligatoires
@@ -234,9 +355,9 @@ def main():
     parser.add_argument(
         "--model", "-m"
         ,type=str
-        ,choices=["tiny", "base", "small", "medium", "large"]
-        ,default="base"
-        ,help="Modèle Whisper (défaut: base)"
+        ,choices=["small", "medium", "large", "auto"]
+        ,default="auto"
+        ,help="Modèle Whisper (défaut: auto=medium/small selon taille)"
     )
 
     parser.add_argument(
@@ -326,27 +447,30 @@ def main():
             print(f"❌ Fichier audio invalide: {audio_path}")
             return 1
 
+        # Détermination du modèle optimal
+        if args.model == "auto":
+            optimal_model = get_optimal_model(audio_path, "auto")
+        else:
+            optimal_model = args.model
+
         # Affichage info de démarrage (sauf mode quiet)
         if not args.quiet:
-            print("🎤 SUMMORA - MODULE TRANSCRIPTION")
+            print("🎤 SUMMORA V3 - MODULE TRANSCRIPTION")
             print(f"📁 Fichier: {audio_path.name}")
-            print(f"🤖 Modèle: {args.model}")
+            print(f"🤖 Modèle: {optimal_model}" + (" (auto-sélectionné)" if args.model == "auto" else ""))
             print(f"🌍 Langue: {args.language}")
             if args.temperature > 0:
                 print(f"🌡️  Température: {args.temperature}")
             print("-" * 50)
 
-        # Transcription
+        # Transcription avec fallback
         start_time = datetime.now()
 
         if not args.quiet:
-            logger.info(f"🎤 Démarrage transcription avec modèle '{args.model}'...")
+            logger.info(f"🎤 Démarrage transcription avec fallback automatique...")
 
-        transcription_result = transcribe_meeting_audio(
-            audio_path,
-            model_size=args.model,
-            language=args.language,
-            temperature=args.temperature
+        transcription_result = transcribe_with_fallback(
+            audio_path, optimal_model, args.language, args.temperature
         )
 
         end_time = datetime.now()
@@ -354,7 +478,7 @@ def main():
 
         # Vérification des erreurs
         if "error" in transcription_result:
-            print(f"❌ Erreur transcription: {transcription_result['message']}")
+            print(f"❌ Erreur transcription: {transcription_result.get('message', 'Erreur inconnue')}")
             return 1
 
         # Sauvegarde si demandée
@@ -362,7 +486,7 @@ def main():
         if not args.no_save:
             # Sauvegarde texte
             saved_path = save_transcription(
-                transcription_result, audio_path, args.model,
+                transcription_result, audio_path, optimal_model,
                 processing_time, args.language, args.output
             )
             saved_files.append(saved_path)
@@ -370,7 +494,7 @@ def main():
             # Sauvegarde JSON si demandée
             if args.json_metadata:
                 json_path = save_metadata_json(
-                    transcription_result, audio_path, args.model,
+                    transcription_result, audio_path, optimal_model,
                     processing_time, args.language, saved_path
                 )
                 saved_files.append(json_path)
@@ -385,7 +509,7 @@ def main():
         else:
             # Mode normal : résumé complet
             print_summary(
-                transcription_result, audio_path, args.model, processing_time,
+                transcription_result, audio_path, optimal_model, processing_time,
                 show_preview=not args.no_preview,
                 show_full=args.full_text
             )

@@ -15,6 +15,7 @@ output/
 keys/
 *.pem
 *.ppk
+.env
 
 # Métadonnées windows
 *:Zone.Identifier

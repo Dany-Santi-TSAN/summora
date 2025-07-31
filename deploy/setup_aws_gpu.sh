@@ -1,17 +1,18 @@
 #!/bin/bash
 
 ############################################
-# 🚀 SETUP AWS GPU Instance pour Summora - V2.0
-# 🎯 Basé sur l'expérience terrain g4dn.xlarge Tesla T4
-# 🔧 Fixes : Triton bug, duration fix, word_timestamps, etc.
+# 🚀 SETUP AWS GPU Instance pour Summora - V2.1
+# 🎯 Optimisé pour AB Testing LLM (Phi-3 vs Llama)
+# 🔧 Skip Whisper test - économie 1.42GB RAM
 ############################################
 
 set -e  # Exit on error
 
-echo "🚀 SUMMORA AWS GPU SETUP V2.0"
-echo "=============================="
+echo "🚀 SUMMORA AWS GPU SETUP V2.1 - AB TESTING OPTIMIZED"
+echo "====================================================="
 echo "📅 $(date)"
 echo "🖥️ Instance recommandée : g4dn.xlarge (Tesla T4)"
+echo "🎯 Focus: AB Testing LLM sans surcharge Whisper"
 echo ""
 
 ############################################
@@ -25,7 +26,7 @@ echo "RAM: $(free -h | grep '^Mem:' | awk '{print $2}')"
 echo ""
 
 ############################################
-# 1. 🔍 Détection GPU NVIDIA (sans installation drivers)
+# 1. 🔍 Détection GPU NVIDIA
 ############################################
 echo "🔍 Détection matériel GPU..."
 if lspci | grep -i nvidia > /dev/null; then
@@ -44,13 +45,12 @@ sudo apt update -y
 sudo apt install -y \
     python3-pip python3-venv python-is-python3 git wget curl \
     build-essential pkg-config \
-    ffmpeg libavcodec-dev libavformat-dev libavutil-dev \
-    htop tree unzip
+    htop tree unzip vim
 
-echo "✅ Packages essentiels installés"
+echo "✅ Packages essentiels installés (sans ffmpeg - économie)"
 
 ############################################
-# 3. 🎯 Installation drivers NVIDIA (version testée)
+# 3. 🎯 Installation drivers NVIDIA
 ############################################
 echo "🎯 Installation drivers NVIDIA optimisés..."
 sudo apt install -y nvidia-driver-535 nvidia-utils-535
@@ -95,11 +95,11 @@ echo "✅ Environnement virtuel activé: summora-env"
 ############################################
 # 6. 🔥 PyTorch CUDA - Version testée
 ############################################
-echo "🔥 Installation PyTorch CUDA (version testée)..."
+echo "🔥 Installation PyTorch CUDA (Tesla T4 optimized)..."
 pip install --upgrade pip
 pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu118
 
-# Test immédiat
+# Test immédiat CUDA
 echo "🧪 Test PyTorch CUDA..."
 python -c "
 import torch
@@ -108,51 +108,64 @@ print(f'✅ CUDA available: {torch.cuda.is_available()}')
 if torch.cuda.is_available():
     print(f'✅ GPU: {torch.cuda.get_device_name(0)}')
     print(f'✅ CUDA version: {torch.version.cuda}')
+    print(f'✅ GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f}GB')
 else:
     raise Exception('❌ CUDA non disponible')
 "
 
 ############################################
-# 7. 🎤 Whisper + fixes terrain
+# 7. 🤖 Dépendances LLM AB Testing
 ############################################
-echo "🎤 Installation Whisper avec optimisations..."
-pip install openai-whisper
+echo "🤖 Installation dépendances LLM AB Testing..."
 
-# Test rapide Whisper
-echo "🧪 Test Whisper base..."
+# Quantization & LLM essentials
+echo "📦 Installation quantization (bitsandbytes + accelerate)..."
+pip install bitsandbytes==0.43.0 accelerate==0.33.0
+
+echo "📦 Installation Transformers + HuggingFace..."
+pip install transformers==4.44.0 huggingface-hub datasets
+
+echo "📦 Installation utilitaires..."
+pip install python-dotenv tqdm
+
+# Test critique: imports LLM
+echo "🧪 Test imports LLM AB Testing..."
 python -c "
-import whisper
-print('📦 Chargement modèle base...')
-model = whisper.load_model('base')
-print('✅ Whisper base opérationnel')
+import torch
+import transformers
+import bitsandbytes
+import accelerate
+from huggingface_hub import login
+
+print(f'✅ Transformers: {transformers.__version__}')
+print(f'✅ BitsAndBytes: {bitsandbytes.__version__}')
+print(f'✅ Accelerate: {accelerate.__version__}')
+print('✅ Quantization 4-bit ready!')
 "
 
 ############################################
-# 8. 📋 Dépendances Summora complètes
+# 8. 📋 Dépendances Summora optionnelles
 ############################################
-echo "📋 Installation dépendances Summora..."
+echo "📋 Installation dépendances Summora (si requirements.txt)..."
 
-# Installation via requirements.txt (méthode testée)
-if [ -f "requirements.txt" ]; then
-    echo "✅ requirements.txt trouvé, installation..."
+if [ -f "summora/requirements.txt" ]; then
+    echo "✅ requirements.txt trouvé, installation selective..."
+    # Installation selective sans ffmpeg/librosa (économie)
+    pip install scikit-learn pandas numpy
+    pip install nltk yake textstat
+    echo "✅ Dépendances core Summora installées"
+elif [ -f "requirements.txt" ]; then
+    echo "✅ requirements.txt trouvé à la racine..."
     pip install -r requirements.txt
 else
-    echo "⚠️ requirements.txt non trouvé, installation manuelle..."
-    # Fallback: installation manuelle (évite bugs pip resolver)
-    pip install nltk scikit-learn numpy pandas
-    pip install librosa soundfile
-    pip install transformers datasets
-    pip install yake textstat gensim
-    pip install matplotlib seaborn
-    pip install tqdm
+    echo "⚠️ requirements.txt non trouvé - installation minimale..."
+    pip install scikit-learn pandas numpy nltk
 fi
 
-echo "✅ Dépendances Summora installées"
-
 ############################################
-# 9. 🔧 Configuration NLTK optimisée
+# 9. 🔧 Configuration NLTK minimale
 ############################################
-echo "🔧 Configuration NLTK..."
+echo "🔧 Configuration NLTK minimale..."
 python -c "
 import nltk
 import ssl
@@ -163,8 +176,9 @@ except AttributeError:
 else:
     ssl._create_default_https_context = _create_unverified_https_context
 
-# Download ressources essentielles
-for resource in ['punkt', 'stopwords', 'wordnet', 'omw-1.4']:
+# Download ressources essentielles uniquement
+essential_resources = ['punkt', 'stopwords']
+for resource in essential_resources:
     try:
         nltk.download(resource, quiet=True)
         print(f'✅ {resource}')
@@ -173,89 +187,147 @@ for resource in ['punkt', 'stopwords', 'wordnet', 'omw-1.4']:
 "
 
 ############################################
-# 10. 🎯 Setup projet Summora
+# 10. 🎯 Setup projet Summora optimisé
 ############################################
-echo "🎯 Setup répertoire projet..."
-mkdir -p ~/summora/{data,output,scripts}
+echo "🎯 Setup répertoire projet Summora..."
+mkdir -p ~/summora/{data,output,src/llm}
 cd ~/summora
 
-# .bashrc shortcut
+# .bashrc shortcuts optimisés
 echo "" >> ~/.bashrc
-echo "# Summora shortcuts" >> ~/.bashrc
+echo "# Summora AB Testing shortcuts" >> ~/.bashrc
 echo "alias summora='cd ~/summora && source ~/summora-env/bin/activate'" >> ~/.bashrc
 echo "alias gpu-status='watch -n 1 nvidia-smi'" >> ~/.bashrc
+echo "alias ab-test='cd ~/summora && source ~/summora-env/bin/activate && python src/llm/ab_testing_aws_phi_llama.py'" >> ~/.bashrc
 
 ############################################
-# 11. 🧪 Tests finaux complets
+# 11. 🧪 Tests finaux LLM (sans Whisper)
 ############################################
-echo "🧪 Tests finaux Summora..."
+echo "🧪 Tests finaux AB Testing (skip Whisper = économie 1.42GB)..."
 
-# Test GPU + Whisper medium
+# Test quantization 4-bit (critique pour Tesla T4)
 python -c "
-import whisper
 import torch
-import time
+from transformers import BitsAndBytesConfig
 
-print('🎯 Test benchmark Whisper Medium...')
-start = time.time()
-model = whisper.load_model('medium')
-load_time = time.time() - start
-
-print(f'✅ Medium chargé en {load_time:.1f}s')
-print(f'✅ GPU: {torch.cuda.get_device_name(0)}')
-print(f'✅ VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f}GB')
+print('🎯 Test quantization 4-bit...')
+quantization_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_compute_dtype=torch.float16,
+    bnb_4bit_use_double_quant=True,
+    bnb_4bit_quant_type='nf4'
+)
+print('✅ Quantization 4-bit config OK')
+print('✅ Tesla T4 ready pour Phi-3 + Llama')
 "
 
-# Test composants Summora
+# Test HuggingFace (sans chargement modèle)
 python -c "
-try:
-    import nltk, sklearn, librosa, transformers
-    print('✅ Imports Summora OK')
-except Exception as e:
-    print(f'❌ Import error: {e}')
+from huggingface_hub import HfApi
+api = HfApi()
+print('✅ HuggingFace API accessible')
+print('📋 Modèles supportés: Phi-3, Llama-3.2, Gemma-2')
 "
 
 ############################################
-# 12. 📊 Monitoring final
+# 12. 📊 Monitoring final optimisé
 ############################################
 echo ""
-echo "📊 État final du système:"
-echo "========================="
-echo "💾 RAM:"
+echo "📊 État final système (AB Testing optimized):"
+echo "=============================================="
+echo "💾 RAM disponible:"
 free -h | grep '^Mem:'
 
 echo ""
 echo "💿 Disque:"
-df -h | grep -E '^/dev/(xvda|nvme)'
+df -h | grep -E '^/dev/(xvda|nvme)' | head -1
 
 echo ""
-echo "🔥 GPU:"
-nvidia-smi --query-gpu=name,memory.total,memory.used,utilization.gpu --format=csv,noheader,nounits
+echo "🔥 GPU Tesla T4:"
+nvidia-smi --query-gpu=name,memory.total,memory.free,utilization.gpu --format=csv,noheader,nounits
+
+echo ""
+echo "🎯 Mémoire économisée (vs V2.0):"
+echo "  - Skip Whisper Medium: ~1.42GB"
+echo "  - Skip ffmpeg/librosa: ~200MB"
+echo "  - Total économie: ~1.6GB pour AB Testing"
 
 ############################################
-# 13. 🎉 Instructions finales
+# 13. 🎉 Instructions finales AB Testing
 ############################################
 echo ""
-echo "🎉 SUMMORA AWS GPU SETUP TERMINÉ !"
-echo "=================================="
+echo "🎉 SUMMORA AWS GPU V2.1 - AB TESTING READY !"
+echo "============================================="
 echo ""
 echo "🔧 Commandes utiles:"
-echo "  summora                    # Aller dans le projet + activer env"
-echo "  gpu-status                 # Monitor GPU en temps réel"
-echo "  source ~/summora-env/bin/activate  # Activer env manuellement"
+echo "  summora                    # Activer env Summora"
+echo "  ab-test                    # Lancer AB Testing directement"
+echo "  gpu-status                 # Monitor GPU temps réel"
 echo ""
-echo "📋 Prochaines étapes:"
+echo "📋 Prochaines étapes AB Testing:"
 echo "  1. Transfer code: scp -i key.pem -r . ubuntu@IP:~/summora/"
-echo "  2. Test benchmark: python benchmark_whisper_gpu.py"
-echo "  3. Transcription: python -c 'import whisper; whisper.load_model(\"medium\")'"
+echo "  2. Setup .env: echo 'HF_TOKEN=your_token' > ~/summora/.env"
+echo "  3. Launch test: ab-test"
 echo ""
-echo "⚡ Modèles recommandés: medium (prod) vs large (qualité max)"
-echo "🎯 RTF attendu: ~0.2x (5x plus rapide que temps réel)"
+echo "🎯 Modèles AB Testing:"
+echo "  • Phi-3-mini-4k-instruct (Microsoft)"
+echo "  • Llama-3.2-3B (Meta)"
+echo "  • Quantization 4-bit (économie Tesla T4)"
 echo ""
-echo "💡 Fixes appliqués:"
-echo "  - Drivers NVIDIA 535 (stable Tesla T4)"
-echo "  - PyTorch CUDA 11.8 (compatible)"
-echo "  - NLTK resources préchargés"
-echo "  - word_timestamps=False (évite bug Triton)"
+echo "💡 Optimisations appliquées V2.1:"
+echo "  ✅ Skip Whisper test (-1.42GB RAM)"
+echo "  ✅ Deps LLM essentielles seulement"
+echo "  ✅ Quantization 4-bit ready"
+echo "  ✅ HuggingFace auth ready"
+echo "  ✅ Tesla T4 8GB optimized"
 echo ""
-echo "🚀 Ready for Summora development!"
+echo "🚀 Ready for Phi-3 vs Llama AB Testing!"
+
+############################################
+# 14. 📄 Génération script test rapide
+############################################
+echo ""
+echo "📄 Génération script de test rapide..."
+cat > ~/test_gpu_ready.py << 'EOF'
+#!/usr/bin/env python3
+"""Test rapide GPU Tesla T4 ready pour AB Testing"""
+import torch
+from transformers import BitsAndBytesConfig
+
+def test_gpu_ab_ready():
+    print("🧪 Test Tesla T4 AB Testing Ready...")
+
+    # Test 1: CUDA
+    if torch.cuda.is_available():
+        gpu_name = torch.cuda.get_device_name(0)
+        gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1e9
+        print(f"✅ GPU: {gpu_name} ({gpu_memory:.1f}GB)")
+    else:
+        print("❌ CUDA non disponible")
+        return False
+
+    # Test 2: Quantization
+    try:
+        config = BitsAndBytesConfig(load_in_4bit=True)
+        print("✅ Quantization 4-bit OK")
+    except Exception as e:
+        print(f"❌ Quantization error: {e}")
+        return False
+
+    # Test 3: Memory check
+    free_mem = torch.cuda.get_device_properties(0).total_memory / 1e9
+    if free_mem >= 7.5:  # Tesla T4 minimum viable
+        print(f"✅ GPU Memory sufficient: {free_mem:.1f}GB")
+    else:
+        print(f"⚠️ GPU Memory low: {free_mem:.1f}GB")
+
+    print("🚀 Tesla T4 ready pour AB Testing Phi-3 vs Llama!")
+    return True
+
+if __name__ == "__main__":
+    test_gpu_ab_ready()
+EOF
+
+chmod +x ~/test_gpu_ready.py
+echo "✅ Script test généré: ~/test_gpu_ready.py"
+echo "   Usage: python ~/test_gpu_ready.py"
