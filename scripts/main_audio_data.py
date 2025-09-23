@@ -1,7 +1,13 @@
 """
 Summora - Module d'Analyse Audio
-Analyse des propriétés audio avec visualisations pour meetings
-Usage: python main_visual.py audio.mp3 --plots --model-comparison
+
+Analyse technique et qualitative des enregistrements de meetings :
+- Extraction de métriques audio (durée, énergie, dynamique, MFCC, etc.)
+- Indicateurs spécifiques réunions (speech/silence ratio, qualité globale, recommandations)
+- Comparaison de modèles d’analyse et génération de visualisations optionnelles
+- Export des résultats au format JSON pour intégration pipeline Summora
+
+Usage: python main_audio_data.py audio.mp3 --plots --model-comparison
 """
 import argparse
 import logging
@@ -220,11 +226,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
     Exemples d'usage:
-    python main_visual.py audio.mp3                           # Analyse basique
-    python main_visual.py audio.wav --plots                   # Avec visualisations
-    python main_visual.py audio.mp3 --model-comparison        # Comparaison modèles
-    python main_visual.py audio.mp3 --output analysis.json    # Sortie personnalisée
-    python main_visual.py audio.mp3 --no-plots --quiet        # Minimal output
+    python main_audio_data.py audio.mp3                           # Analyse basique
+    python main_audio_data.py audio.wav --plots                   # Avec visualisations
+    python main_audio_data.py audio.mp3 --model-comparison        # Comparaison modèles
+    python main_audio_data.py audio.mp3 --output analysis.json    # Sortie personnalisée
+    python main_audio_data.py audio.mp3 --no-plots --quiet        # Minimal output
         """
     )
 

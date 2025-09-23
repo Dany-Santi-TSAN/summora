@@ -1,14 +1,22 @@
 """
 LLM Qwen Recommendation pour amélioration des meetings
 Module avec LLM Juge + SpotChecker + Eval fallback
+REFACTO : centralisé avec llm_config.py
 """
 import json
-import os
 import time
 import logging
 from typing import Dict, Optional
 from openai import OpenAI
 from dotenv import load_dotenv
+from pathlib import Path
+import sys
+
+# Path setup pour imports
+sys.path.append(str(Path(__file__).parent.parent.parent))
+
+# Imports SUMMORA
+from src.config.llm_config import MODELS, PROMPTS, config
 
 # Charge les variables depuis .env
 load_dotenv()
@@ -21,7 +29,7 @@ class QwenRecommendator:
 
     Architecture cohérente avec les autres modules LLM :
     - Génération avec Qwen
-    - Évaluation avec Judge DeepSeek
+    - Évaluation avec Judge DeepSeek R1
     - API unifiée recommend_and_evaluate()
     """
 
@@ -33,104 +41,103 @@ class QwenRecommendator:
             api_key: Clé API OpenRouter (ou depuis .env)
         """
         if api_key is None:
-            api_key = os.getenv('OPENROUTER_API_KEY')
+            api_key = config.openrouter_api_key
 
         if not api_key:
             raise ValueError("Clé API OpenRouter requise (OPENROUTER_API_KEY en env ou paramètre)")
 
         self.client = OpenAI(
-            api_key=api_key,
-            base_url="https://openrouter.ai/api/v1"
+            api_key=api_key
+            ,base_url=config.base_url
         )
 
-        # Modèles LLM (pattern identique aux autres modules)
-        self.recommender_model = "qwen/qwen3-235b-a22b:free"
-        self.judge_model = "tngtech/deepseek-r1t-chimera:free"
-        self.fallback_judge = "nousresearch/deephermes-3-llama-3-8b-preview:free"
+        # Modèles LLM
+        self.recommender_model = MODELS['recommendation']
+        self.judge_model = MODELS['judge_primary']
+        self.fallback_judge = MODELS['judge_fallback']
 
         logger.info("💡 Recommandeur Qwen+Judge initialisé")
 
-    def generate_meeting_recommendations(self, transcription: str, extraction_data: Dict = None) -> Dict:
+    def generate_meeting_recommendations(self, transcription: str, enhanced_data: Dict = None,
+                                  meeting_context: str = "", specialized_context: str = "",
+                                  meeting_type: str = "Général") -> Dict:
         """
-        Génère des recommandations d'amélioration meeting ultra simples et académiques.
+        Génère des recommandations d'amélioration meeting avec contexte RAG enrichi.
+
+        Utilise les contextes enrichis pour adapter les recommandations :
+        - RAG : Documents leadership et best practices
+        - Meeting context : Type + topics + actions détectées
+        - Specialized context : Few-shot adaptatif selon le type
 
         Args:
             transcription: Transcription de la réunion
-            extraction_data: Données d'extraction (optionnel, pour enrichir contexte)
+            enhanced_data: Données enrichies RAG + extraction
+            meeting_context: Contexte meeting enrichi (TYPE: X | TOPICS: Y | ACTIONS: Z)
+            specialized_context: Few-shot spécialisé selon type meeting
+            meeting_type: Type de meeting détecté
 
         Returns:
-            Dict: Recommandations structurées
+            Dict: Recommandations structurées avec métriques enrichissement
         """
-        # Contexte enrichi si extraction disponible
-        context_info = ""
-        if extraction_data and extraction_data.get('success'):
-            extraction = extraction_data.get('extraction', {})
-            topics = extraction.get('topics_principaux', [])
-            points = extraction.get('points_a_retenir', [])
-
-            context_info = f"""
-CONTEXTE EXTRACTION DISPONIBLE :
-Topics identifiés : {', '.join(topics[:3])}
-Points clés : {len(points)} identifiés
-            """
-
-        prompt = f"""Tu es consultant expert en optimisation de meetings d'entreprise.
-
-Analyse cette transcription de réunion et génère des recommandations CONCRÈTES et ACTIONNABLES pour améliorer les futurs meetings.
-
-{context_info}
-
-TRANSCRIPTION À ANALYSER :
-{transcription[:3000]}
-
-Génère 5-8 recommandations dans ces catégories :
-- **Structure** : Améliorer l'organisation
-- **Animation** : Optimiser la conduite
-- **Participation** : Favoriser l'engagement
-- **Efficacité** : Maximiser les résultats
-- **Communication** : Clarifier les échanges
-
-Format JSON uniquement :
-{{
-    "recommandations_principales": [
-        {{
-            "categorie": "Structure",
-            "titre": "Définir un ordre du jour précis",
-            "description": "Préparer et partager l'agenda 24h avant le meeting avec objectifs clairs",
-            "impact": "high",
-            "facilite_implementation": "easy"
-        }},
-        {{
-            "categorie": "Animation",
-            "titre": "Améliorer la gestion du temps",
-            "description": "Utiliser un timer et allouer des créneaux précis pour chaque sujet",
-            "impact": "medium",
-            "facilite_implementation": "medium"
-        }}
-    ],
-    "resume_conseil": "Synthèse des 2-3 améliorations prioritaires pour transformer ce type de réunion",
-    "score_amelioration_potentiel": 75
-}}"""
-
-        logger.info(f"💡 Génération recommandations - Input: {len(transcription)} chars")
+        logger.info(f"💡 Génération recommandations RAG-Enhanced - Input: {len(transcription)} chars")
         start_time = time.time()
+
+        # Construction du prompt avec tous les contextes
+        prompt = PROMPTS['recommendation'](transcription,
+                                            enhanced_data,
+                                            meeting_context,
+                                            specialized_context,
+                                            meeting_type
+                                            )
 
         try:
             response = self.client.chat.completions.create(
-                model=self.recommender_model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=3000,
-                temperature=0.2  # Légère créativité pour recommandations variées
+            model=self.recommender_model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=config.max_tokens_reco,
+            temperature=config.temperature_reco
             )
 
             duration = time.time() - start_time
             result = response.choices[0].message.content
+            logger.info(f"RAW RESPONSE '{result[:200]}'")
+            logger.info(f"Len de RAW RESPONSE: '{len(result)}'")
 
             logger.info(f"✅ Recommandations générées en {duration:.2f}s - Output: {len(result)} chars")
 
+            # Clean parsing json
+            cleaned_response = result.strip()
+
+            # Retire les balises markdown
+            if cleaned_response.startswith('```json'):
+                cleaned_response = cleaned_response[7:]  # Retire '```json'
+            if cleaned_response.startswith('```'):
+                cleaned_response = cleaned_response[3:]   # Retire '```'
+            if cleaned_response.endswith('```'):
+                cleaned_response = cleaned_response[:-3]  # Retire '```' final
+
+            cleaned_response = cleaned_response.strip()
+
+            # DEBUG
+            logger.info(f"DEBUG - Après nettoyage: {cleaned_response[:200]}...")
+
+
             # Parse et validation JSON
             try:
-                parsed_result = json.loads(result)
+                parsed_result = json.loads(cleaned_response)
+                logger.info(f"✅ JSON parsing réussi")
+                logger.info(f"Clés JSON: {list(parsed_result.keys())}")
+                if 'recommandations_principales' in parsed_result:
+                    logger.info(f"Nb recommandations: {len(parsed_result['recommandations_principales'])}")
+
+                # Enrichissement des métriques avec contextes utilisés
+                context_metrics = {
+                    "rag_context_used": bool(enhanced_data and 'rag_context' in enhanced_data),
+                    "meeting_context_used": bool(meeting_context),
+                    "specialized_context_used": bool(specialized_context),
+                    "meeting_type_detected": meeting_type
+                    }
+
                 return {
                     "success": True,
                     "data": parsed_result,
@@ -140,25 +147,42 @@ Format JSON uniquement :
                         "model": self.recommender_model,
                         "input_chars": len(transcription),
                         "output_chars": len(result),
-                        "context_enriched": bool(extraction_data)
+                        "context_enriched": bool(enhanced_data),
+                        "enhancement_level": self._determine_enhancement_level(context_metrics),
+                        **context_metrics
                     }
-                }
+            }
             except json.JSONDecodeError as e:
                 logger.error(f"❌ Erreur parsing JSON recommandations: {e}")
                 return {
                     "success": False,
                     "error": "json_parsing_failed",
                     "raw_content": result,
+                    "meeting_type_detected": meeting_type,
                     "metrics": {"duration": duration}
-                }
+           }
 
         except Exception as e:
             logger.error(f"❌ Erreur génération recommandations: {str(e)}")
             return {
                 "success": False,
                 "error": str(e),
+                "meeting_type_detected": meeting_type,
                 "metrics": {"duration": time.time() - start_time}
-            }
+                }
+
+    def _determine_enhancement_level(self, context_metrics: Dict) -> str:
+        """Détermine le niveau d'enrichissement utilisé."""
+        if context_metrics["rag_context_used"] and context_metrics["meeting_context_used"] and context_metrics["specialized_context_used"]:
+            return "rag_meeting_specialized_full"
+        elif context_metrics["rag_context_used"] and context_metrics["meeting_context_used"]:
+            return "rag_meeting_enhanced"
+        elif context_metrics["rag_context_used"]:
+            return "rag_basic"
+        elif context_metrics["meeting_context_used"]:
+            return "meeting_context_only"
+        else:
+            return "basic"
 
     def judge_recommendations_quality(self, transcription: str, recommendations_data: Dict) -> Dict:
         """
@@ -172,35 +196,7 @@ Format JSON uniquement :
         Returns:
             Dict: Scores de qualité des recommandations
         """
-        recommandations = recommendations_data.get("recommandations_principales", [])
-        resume_conseil = recommendations_data.get("resume_conseil", "")
-
-        prompt = f"""Tu es expert en évaluation de qualité de recommandations business.
-
-Évalue ces recommandations d'amélioration meeting selon ces critères (score 0-100) :
-- **Pertinence** : Les recommandations sont-elles adaptées aux problèmes détectés ?
-- **Actionnabilité** : Peut-on facilement les mettre en œuvre ?
-- **Impact** : Vont-elles vraiment améliorer les futures réunions ?
-- **Spécificité** : Sont-elles concrètes et précises ?
-
-TRANSCRIPTION ORIGINALE (extrait) :
-{transcription[:2000]}...
-
-RECOMMANDATIONS À ÉVALUER :
-{json.dumps(recommandations[:3], indent=2, ensure_ascii=False)}
-
-Résumé conseil : {resume_conseil}
-
-Réponds en JSON uniquement :
-{{
-    "pertinence": 85,
-    "actionnabilite": 90,
-    "impact_potentiel": 80,
-    "specificite": 88,
-    "score_global": 86,
-    "justification": "Bonnes recommandations concrètes et applicables...",
-    "qualite_conseil": "high"
-}}"""
+        prompt = PROMPTS['judge_recommendation'](transcription, recommendations_data)
 
         logger.info("⚖️ Évaluation recommandations par Judge...")
         start_time = time.time()
@@ -208,10 +204,10 @@ Réponds en JSON uniquement :
         # Tentative avec judge principal
         try:
             response = self.client.chat.completions.create(
-                model=self.judge_model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=1000,
-                temperature=0.1
+                model=self.judge_model
+                ,messages=[{"role": "user", "content": prompt}]
+                ,max_tokens=config.judge_max_tokens
+                ,temperature=config.temperature
             )
 
             duration = time.time() - start_time
@@ -294,10 +290,10 @@ Réponds en JSON uniquement :
             # Fallback judge (même logique que extractor)
             try:
                 response = self.client.chat.completions.create(
-                    model=self.fallback_judge,
-                    messages=[{"role": "user", "content": prompt}],
-                    max_tokens=1000,
-                    temperature=0.1
+                    model=self.fallback_judge
+                    ,messages=[{"role": "user", "content": prompt}]
+                    ,max_tokens=config.judge_max_tokens
+                    ,temperature=config.temperature
                 )
 
                 duration = time.time() - start_time
@@ -352,42 +348,64 @@ Réponds en JSON uniquement :
                     "metrics": {"duration": time.time() - start_time}
                 }
 
-    def recommend_and_evaluate(self, transcription: str, extraction_data: Dict = None) -> Dict:
+    def recommend_and_evaluate(self, transcription: str, enhanced_data: Dict = None) -> Dict:
         """
-        Pipeline complet : Génération recommandations + Évaluation qualité.
-        API unifiée sur modèle des autres modules LLM.
+        Pipeline complet : Génération recommandations + Évaluation qualité avec contexte RAG enrichi.
+
+        Traite les données enrichies incluant :
+        - Contexte RAG (documents leadership)
+        - Contexte meeting (type, topics, actions/décisions)
+        - Contexte spécialisé (few-shot adaptatif)
 
         Args:
             transcription: Transcription de la réunion
-            extraction_data: Données d'extraction (optionnel)
+            enhanced_data: Données enrichies incluant RAG + contexte meeting
+                - rag_context: Documents leadership pertinents
+                - meeting_context: Type + topics + actions détectées
+                - specialized_context: Few-shot adaptatif selon type
+                - meeting_type: Type détecté (brainstorming, décisionnelle, etc.)
 
-        Returns:
-            Dict: Recommandations + évaluation complète
+        Retourne:
+            Dict: Recommandations + évaluation avec métriques enrichissement
         """
-        logger.info(f"💡 Pipeline recommandations+évaluation - Input: {len(transcription)} chars")
+        logger.info(f"Pipeline recommandations RAG-Enhanced - Input: {len(transcription)} chars")
         start_time = time.time()
 
-        # 1. Génération recommandations
-        recommendation_result = self.generate_meeting_recommendations(transcription, extraction_data)
+        # Extraction des contextes enrichis
+        meeting_context = enhanced_data.get('meeting_context', '') if enhanced_data else ''
+        meeting_type = enhanced_data.get('meeting_type', 'Général') if enhanced_data else 'Général'
+        specialized_context = enhanced_data.get('specialized_context', '') if enhanced_data else ''
+        rag_used = 'rag_context' in (enhanced_data or {})
+
+        # 1. Génération recommandations avec contexte enrichi
+        recommendation_result = self.generate_meeting_recommendations(
+                        transcription,
+                        enhanced_data,
+                        meeting_context=meeting_context,
+                        specialized_context=specialized_context,
+                        meeting_type=meeting_type
+                        )
 
         if not recommendation_result["success"]:
             return {
-                "method": "qwen_recommender_with_judge",
+                "method": "rag_enhanced_qwen_recommender",
                 "success": False,
                 "error": "recommendation_generation_failed",
                 "recommendation_details": recommendation_result,
+                "meeting_type_detected": meeting_type,
+                "rag_used": rag_used,
                 "metrics": {"duration": time.time() - start_time}
             }
 
         recommendations_data = recommendation_result["data"]
 
-        # 2. Évaluation qualité
+        # 2. Évaluation qualité avec contexte
         judge_result = self.judge_recommendations_quality(transcription, recommendations_data)
 
         total_duration = time.time() - start_time
 
         return {
-            "method": "qwen_recommender_with_judge",
+            "method": "rag_enhanced_qwen_recommender",
             "success": True,
             "recommendations": {
                 "recommandations_principales": recommendations_data.get("recommandations_principales", []),
@@ -398,13 +416,21 @@ Réponds en JSON uniquement :
             "quality_evaluation": judge_result,
             "ready_for_implementation": recommendation_result["success"] and judge_result.get("success", False),
             "conseil_quality": judge_result.get("qualite_conseil", "medium"),
+            "meeting_type_detected": meeting_type,
+            "rag_used": rag_used,
+            "contexts_used": {
+                "rag_context": bool(enhanced_data and 'rag_context' in enhanced_data),
+                "meeting_context": bool(meeting_context),
+                "specialized_context": bool(specialized_context)
+            },
             "metrics": {
                 "total_duration": total_duration,
                 "generation_duration": recommendation_result["metrics"]["duration"],
                 "judge_duration": judge_result.get("metrics", {}).get("duration", 0),
                 "recommender_model": self.recommender_model,
                 "judge_model": self.judge_model,
-                "context_enriched": recommendation_result["metrics"]["context_enriched"]
+                "context_enriched": recommendation_result["metrics"]["context_enriched"],
+                "enhancement_level": "rag_meeting_specialized" if rag_used and meeting_context else "basic"
             }
         }
 

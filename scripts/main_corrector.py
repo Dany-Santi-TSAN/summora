@@ -51,7 +51,7 @@ class TranscriptionCorrectionPipeline:
         Args:
             transcription_path: Chemin vers le fichier transcription
 
-        Returns:
+        Retourne:
             Dict: Contenu transcription + métadonnées
         """
         file_path = Path(transcription_path)
@@ -145,35 +145,35 @@ class TranscriptionCorrectionPipeline:
                 "fallback": True
             }
 
-    def save_corrected_transcription(self, corrected_text: str, original_filename: str) -> str:
+    def save_ground_truth_transcription(self, corrected_text: str, original_filename: str) -> str:
         """
-        Sauvegarde la transcription corrigée.
+        Sauvegarde la transcription corrigée en texte brut pour lecture humaine.
 
         Args:
             corrected_text: Texte corrigé
             original_filename: Nom du fichier original
 
-        Returns:
+        Retourne:
             str: Chemin du fichier sauvegardé
         """
         # Répertoire de sortie
-        output_dir = Path("output/corrector_transcription")
+        output_dir = Path("output/ground_truth")
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # Nom du fichier avec suffixe
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_filename = f"{original_filename}_corrected_{timestamp}.txt"
+        output_filename = f"{original_filename}_ground_truth_{timestamp}.txt"
         output_path = output_dir / output_filename
 
         try:
             with open(output_path, 'w', encoding='utf-8') as f:
                 f.write(corrected_text)
 
-            logger.info(f"💾 Transcription corrigée sauvegardée: {output_path}")
+            logger.info(f"💾 Ground truth sauvegardé: {output_path}")
             return str(output_path)
 
         except Exception as e:
-            logger.error(f"❌ Erreur sauvegarde: {e}")
+            logger.error(f"❌ Erreur sauvegarde ground truth: {e}")
             return ""
 
     def save_evaluation_report(self, evaluation_data: Dict, original_filename: str) -> str:
@@ -260,7 +260,7 @@ class TranscriptionCorrectionPipeline:
 
 
         # 5. Sauvegarde transcription corrigée
-        corrected_file_path = self.save_corrected_transcription(corrected_text, filename)
+        corrected_file_path = self.save_ground_truth_transcription(corrected_text, filename)
 
         # 6. Assemblage rapport final
         final_report = {
@@ -342,10 +342,13 @@ def main():
     parser.add_argument("--light-eval", action="store_true",
                        help="Mode allégé (skip experimental metrics)")
     parser.add_argument("--verbose", action="store_true", help="Mode verbose")
+    parser.add_argument("--quiet", "-q", action="store_true", help="Mode silencieux")
 
     args = parser.parse_args()
 
     # Configuration logging
+    if args.quiet:
+        logging.getLogger().setLevel(logging.WARNING)
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
@@ -384,7 +387,7 @@ def main():
             processing_time = (datetime.now() - start_time).total_seconds()
 
             # Sauvegarde rapide
-            corrected_file = pipeline.save_corrected_transcription(corrected_text, filename)
+            corrected_file = pipeline.save_ground_truth_transcription(corrected_text, filename)
 
             # Affichage simplifié
             print("\n" + "="*50)

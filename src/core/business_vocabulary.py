@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 BUSINESS_KEYWORDS = {
     'actions': [
-        'action', 'tâche', 'faire', 'réaliser', 'livrer', 'assigner',
+        'action', 'tâche', 'faire', 'réaliser', 'livrer', 'livrable', 'assigner',
         'responsable', 'charge de', 'doit', 'va faire', 'prendre en charge',
         'todo', 'à faire', 'next step', 'prochaine étape'
     ],
@@ -48,7 +48,34 @@ BUSINESS_KEYWORDS = {
         'objectif', 'objectifs', 'but', 'goal', 'cible',
         'résultat', 'performance', 'kpi', 'métrique',
         'indicateur', 'mesure', 'succès'
-    ]
+    ],
+    'meeting_type': {
+        'brainstorming': ['brainstorm', 'idées', 'créativité', 'innovation', 'idéation'],
+        'copil': ['copil', 'pilotage', 'stratégie', 'gouvernance', 'arbitrage'],
+        'rétrospective': ['rétro', 'amélioration', 'sprint', 'feedback', "retour d'expérience", 'post-mortem'],
+        'client': ['client', 'démonstration', 'livrable', 'présentation', 'business review', 'closing'],
+        'conflit': ['conflit', 'désaccord', 'tension', 'médiation', 'litige'],
+        'décisionnelle': ['décision', 'choix', 'validation', 'approuver', 'trancher'],
+        'kickoff': ['kick-off', 'lancement', 'démarrage', 'initiation', 'présentation projet'],
+        'cloture': ['clôture', 'bilan', 'fin de projet', 'conclusion'],
+        'one_to_one': ['one-to-one', '1:1', 'entretien individuel', 'suivi personnel'],
+        'formation': ['formation', 'apprentissage', 'transfert de connaissances', 'atelier pédagogique', 'onboarding'],
+        'team_building': ['team building', 'cohésion', "activité d'équipe", 'dynamique de groupe'],
+        'information': ['information', 'annonce', 'communication', 'news', 'all hands'],
+        'standup': ['stand-up', 'daily', 'point rapide', 'synchronisation', '15 minutes'],
+        'atelier': ['atelier collaboratif', 'workshop', 'co-création', 'travail de groupe'],
+        'prospective': ['prospective', 'innovation', 'anticipation', 'futur', 'tendances','pivot'],
+        'crise': ['comité de crise', 'urgence', 'situation critique', 'problème majeur', 'réunion exceptionnelle'],
+        'negociation': ['négociation', 'accord', 'transaction', 'partenaires', 'deal'],
+        'budget': ['budget', 'financier', 'chiffres', 'coût', 'ressources'],
+        'produit': ['produit', 'roadmap', 'évolution', 'release', 'fonctionnalités','feature','pivot','mvp'],
+        'marketing': ['marketing', 'campagne', 'communication', 'publicité', 'funnel de conversion', 'taux de'],
+        'commerciale': ['commercial', 'ventes', 'pipeline', 'prospects', 'clients'],
+        'rd': ['R&D', 'recherche', 'développement', 'prototype', 'innovation technique', 'poc','backlog'],
+        'qualite': ['qualité', 'norme', 'processus', 'audit'],
+        'securite': ['sécurité', 'risque', 'protection', 'protocoles']
+}
+
 }
 
 # === Fonctions utilitaires ===
@@ -137,7 +164,7 @@ def get_meeting_keywords_legacy() -> Dict[str, List[str]]:
 
 # === Métadonnées ===
 
-BUSINESS_VOCAB_VERSION = "1.0"
+BUSINESS_VOCAB_VERSION = "2.0"
 BUSINESS_VOCAB_TOTAL_WORDS = len(get_all_business_keywords())
 
 def get_business_vocab_info() -> Dict:

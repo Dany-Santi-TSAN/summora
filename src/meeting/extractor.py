@@ -1,6 +1,6 @@
 """
 Extracteur de contenu spécialisé pour les meetings
-Topics, actions, décisions et insights business
+insights business : Topics, actions, décisions et type de réunion
 Version finalisée avec vocabulaires spécialisés
 """
 import re
@@ -35,14 +35,16 @@ class MeetingExtractionConfig:
 
     # Méthodes actives
     enabled_methods: List[str] = None
+    extract_topics: bool = True
     extract_actions: bool = True
     extract_decisions: bool = True
+    extract_meeting_type: bool= True
     use_business_vocabulary: bool = True
     use_enhanced_stopwords: bool = True
 
     def __post_init__(self):
         if self.enabled_methods is None:
-            self.enabled_methods = ['yake', 'actions', 'decisions']
+            self.enabled_methods = ['yake', 'actions', 'decisions', 'meeting_type']
 
 # === Extracteur Topics amélioré ===
 
@@ -149,11 +151,12 @@ class MeetingActionDetector:
         # Mots-clés actions du vocabulaire business
         if config.use_business_vocabulary:
             self.action_keywords = BUSINESS_KEYWORDS['actions']
-            logger.info(f"✅ Vocabulaire actions: {len(self.action_keywords)} mots-clés")
+            logger.info(f"✅ Vocabulaire d'actions : {len(self.action_keywords)} mots-clés")
         else:
             # Fallback patterns basiques
             self.action_keywords = [
-                'action', 'tâche', 'faire', 'doit', 'va',
+                'action', 'à faire', 'tâche', 'réaliser', 'prochaine étape',
+                'todo', 'livrer', 'livrable', 'responsable de'
             ]
 
     def detect_actions(self, text: str) -> Dict:
@@ -260,6 +263,39 @@ class MeetingDecisionDetector:
             logger.error(f"❌ Erreur détection décisions: {e}")
             return {"decisions": [], "error": str(e)}
 
+# === Détecteur type de meeting ===
+
+class MeetingTypeDetector:
+    """Détecteur de type de réunions pour enrichir la recommandation."""
+
+    def __init__(self, config: MeetingExtractionConfig):
+        self.config = config
+
+        # Mots-clés actions du vocabulaire business
+        if config.use_business_vocabulary:
+            self.meeting_type_keywords = BUSINESS_KEYWORDS['meeting_type']
+            logger.info(f"✅ Vocabulaire contextuel du type de réunion : {len(self.meeting_type_keywords)} mots-clés")
+        else:
+            # Fallback patterns basiques
+            self.meeting_type_keywords = {
+            "brainstorming": ["brainstorm", "idées", "créativité"],
+            "copil": ["copil", "pilotage", "stratégie"],
+            "rétrospective": ["rétro", "amélioration", "sprint"],
+            "client": ["client", "démonstration", "livrable"],
+            "conflit": ["conflit", "désaccord", "tension"],
+            "décisionnelle": ["décision", "choix", "arbitrage"]
+        }
+
+    def detect_meeting_type(self, text: str) -> str:
+        """Détecte le type de réunion avec des mots-clés."""
+
+        text_lower = text.lower()
+
+        for meeting_type, keywords in self.meeting_type_keywords.items():
+            if any(kw in text_lower for kw in keywords):
+                return meeting_type.capitalize()
+        return "Général"  # Fallback par défaut
+
 # === Orchestrateur principal ===
 
 
@@ -291,6 +327,9 @@ class MeetingContentExtractor:
         if self.config.extract_decisions:
             self.decision_detector = MeetingDecisionDetector(self.config)
 
+        if self.config.extract_meeting_type:
+            self.meeting_type_detector = MeetingTypeDetector(self.config)
+
         logger.info("🎯 Extracteur meeting amélioré initialisé")
         logger.info(f"   • Méthodes: {self.config.enabled_methods}")
         logger.info(f"   • Vocabulaire business: {'✅' if self.config.use_business_vocabulary else '❌'}")
@@ -308,6 +347,9 @@ class MeetingContentExtractor:
 
         if self.config.extract_decisions:
             methods.append('decisions')
+
+        if self.config.extract_meeting_type:
+            methods.append('meeting_type')
 
         return methods
 
@@ -331,6 +373,8 @@ class MeetingContentExtractor:
                 elif method == 'actions' and result.get('actions'):
                     successful += 1
                 elif method == 'decisions' and result.get('decisions'):
+                    successful += 1
+                elif method == 'meeting_type' and result.get('meeting_type'):
                     successful += 1
 
         success_rate = (successful / total_methods * 100) if total_methods > 0 else 0
@@ -357,6 +401,13 @@ class MeetingContentExtractor:
 
         if 'decisions' in results:
             summary['decisions_count'] = len(results['decisions'].get('decisions', []))
+
+        if 'meeting_type' in results:
+            meeting_type_data = results['meeting_type']
+        if isinstance(meeting_type_data, dict):
+            summary['meeting_type'] = meeting_type_data.get('meeting_type', 'Général')
+        else:
+            summary['meeting_type'] = meeting_type_data
 
         return summary
 
@@ -388,6 +439,14 @@ class MeetingContentExtractor:
             logger.info("📌 Détection décisions...")
             results['decisions'] = self.decision_detector.detect_decisions(text)
 
+        # 4. Type de meeting
+        if 'meeting_type' in methods and hasattr(self, 'meeting_type_detector'):
+            logger.info("📌 Détection type de meeting...")
+            results['meeting_type'] = {
+                'meeting_type': self.meeting_type_detector.detect_meeting_type(text),
+                'method': 'business_vocabulary_enhanced'
+                }
+
         # Synthèse finale
         if self._has_successful_extractions(results):
             logger.info("🏆 Synthèse insights meeting...")
@@ -411,13 +470,16 @@ class MeetingContentExtractor:
 def create_meeting_extractor(extract_topics: bool = True
                            ,extract_actions: bool = True
                            ,extract_decisions: bool = True
+                           ,extract_meeting_type: bool = True
                            ,use_business_vocabulary: bool = True
                            ,use_enhanced_stopwords: bool = True) -> MeetingContentExtractor:
     """Factory pour créer un extracteur amélioré."""
 
     config = MeetingExtractionConfig(
-        extract_actions=extract_actions
+        extract_topics=extract_topics
+        ,extract_actions=extract_actions
         ,extract_decisions=extract_decisions
+        ,extract_meeting_type=extract_meeting_type
         ,use_business_vocabulary=use_business_vocabulary
         ,use_enhanced_stopwords=use_enhanced_stopwords
     )

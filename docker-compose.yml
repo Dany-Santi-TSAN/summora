@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  backend:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - .:/app
+      #- ~/.aws:/root/.aws  # Credentials AWS
+    environment:
+      - PYTHONPATH=/app
+
+  frontend:
+    build: .
+    ports:
+      - "8501:8501"
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONPATH=/app
+    command: streamlit run app/ui_streamlit.py --server.port 8501 --server.address 0.0.0.0
+    depends_on:
+      - backend

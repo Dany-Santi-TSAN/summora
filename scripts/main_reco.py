@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """
-Main Recommendation - Analyse qualité meeting → Recommandations bienveillantes
-Input: JSON extraction (main_extract.py) → Output: Conseils d'amélioration
-Architecture: Analyzer + Reco avec Dict Enhanced by LLM + Saver
+Main Recommendation V3 - Pipeline cascade RAG-Enhanced
+Input: Transcription TXT + (Optional) Audio Analysis JSON → Output: Recommandations
+Architecture simplifiée: Transcription → Extraction → Cascade → Affichage
 """
 import sys
+import os
 import json
 import logging
 import argparse
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 from datetime import datetime
 
 # Configuration du logging
@@ -26,18 +27,16 @@ sys.path.append(str(Path(__file__).parent.parent))
 from src.llm.llm_qwen_recommendation import recommend_and_evaluate_meeting
 from src.qa.spot_checker import SpotChecker
 from src.core.business_vocabulary import BUSINESS_KEYWORDS, get_keyword_category
+from src.rag.rag_meeting_helper import enhance_qwen_with_rag
 
 from dotenv import load_dotenv
-
-# Variables d'environnement
 load_dotenv()
 
-# === DICTIONNAIRE DE RECOMMANDATIONS (Enhanced by Qwen) ===
+# === DICTIONNAIRE DE RECOMMANDATIONS (Enhanced) ===
 class MeetingRecommendationEngine:
     """Moteur de recommandations pour améliorer les meetings - Enhanced Dict."""
 
     def __init__(self):
-        # Base de recommandations existante (celle qui fonctionne)
         self.recommendations_db = {
             'structure': [
                 "Définir un ordre du jour clair avant le meeting",
@@ -73,22 +72,20 @@ class MeetingRecommendationEngine:
 
     def generate_recommendations(self, quality_analysis: Dict, extraction_result: Dict) -> List[Dict]:
         """Génère des recommandations personnalisées selon les faiblesses détectées."""
-        recommendations = []
-        grade = quality_analysis.get('grade', 'D')
-        issues = quality_analysis.get('issues_detected', [])
+        grade = quality_analysis.get('quality_indicators', {}).get('grade', 'D')
 
-        # Recommandations graduées selon le grade
         if grade == "A":
-            # Grade A : Juste encouragement, pas de recommandations
             return [{
                 'categorie': 'Excellence',
                 'titre': 'Meeting exemplaire - Continuez cette excellence !',
-                'description': 'Votre meeting atteint un niveau d\'excellence remarquable. Votre approche est un modèle à suivre.',
+                'description': 'Votre meeting atteint un niveau d\'excellence remarquable.',
                 'impact': 'inspirational',
                 'facilite_implementation': 'immediate',
-                'source': 'encouragement_grade_A'
+                'source': 'dict_enhanced'
             }]
-        elif grade == "B":
+
+        # Sélection recommandations selon grade
+        if grade == "B":
             selected_reco = (
                 self.recommendations_db['structure'][:1] +
                 self.recommendations_db['decisions'][:1]
@@ -108,7 +105,8 @@ class MeetingRecommendationEngine:
             )
 
         # Formatage en dict structuré
-        for i, reco_text in enumerate(selected_reco):
+        recommendations = []
+        for reco_text in selected_reco:
             category = self._get_category_from_text(reco_text)
             recommendations.append({
                 'categorie': category,
@@ -119,28 +117,12 @@ class MeetingRecommendationEngine:
                 'source': 'dict_enhanced'
             })
 
-        return recommendations[:8 if grade == 'D' else (5 if grade == 'C' else (3 if grade == 'B' else 1))]
+        return recommendations[:8 if grade == 'D' else (5 if grade == 'C' else 3)]
 
     def _get_category_from_text(self, text: str) -> str:
-        """Détermine la catégorie d'une recommandation avec vocabulaire DRY."""
+        """Détermine la catégorie d'une recommandation."""
         text_lower = text.lower()
 
-        # Utilisation du vocabulaire business centralisé (DRY)
-        business_mapping = {
-            'actions': 'Action',
-            'decisions': 'Décision',
-            'planning': 'Planning',
-            'organisation': 'Organisation',
-            'finance': 'Finance',
-            'objectifs': 'Objectifs'
-        }
-
-        # Test avec vocabulaire business centralisé
-        for category, keywords in BUSINESS_KEYWORDS.items():
-            if any(keyword.lower() in text_lower for keyword in keywords):
-                return business_mapping.get(category, category.title())
-
-        # Fallback catégories spécifiques recommandations
         if any(word in text_lower for word in ['ordre', 'agenda', 'structurer', 'phases']):
             return 'Structure'
         elif any(word in text_lower for word in ['participant', 'question', 'tour de table']):
@@ -152,230 +134,287 @@ class MeetingRecommendationEngine:
         else:
             return 'Général'
 
-# === CLASSE 1: RecommendationAnalyzer (Compatible extraction JSON) ===
+# === ANALYSEUR QUALITÉ ===
 class RecommendationAnalyzer:
-    """Analyseur de qualité meeting - Compatible avec JSON d'extraction."""
+    """Analyseur de qualité meeting."""
 
     def __init__(self):
-        logger.info("📊 Analyseur qualité meeting initialisé (format extraction)")
+        logger.info("Analyseur qualité meeting initialisé")
 
     def analyze_extraction_quality(self, extraction_data: Dict) -> Dict:
-        """
-        Analyse la qualité d'un meeting depuis JSON extraction.
-
-        Args:
-            extraction_data: JSON de main_extract.py
-
-        Returns:
-            Dict: Analyse des points forts + améliorations possibles
-        """
+        """Analyse la qualité d'un meeting depuis données d'extraction."""
         try:
-            # Extraction des données principales
             transcription_data = extraction_data.get('transcription', {})
             existing_quality = transcription_data.get('quality_analysis', {})
             extraction_results = extraction_data.get('extraction', {})
 
             transcription_text = transcription_data.get('text', '')
             grade = existing_quality.get('grade', 'C')
-            global_score = existing_quality.get('global_score', 50)
+            global_score = existing_quality.get('global_score', 70)
 
-            # Données enrichies d'extraction
-            topics = extraction_results.get('topics_principaux', [])
-            points = extraction_results.get('points_a_retenir', [])
-            method_used = extraction_data.get('cascade_info', {}).get('method_used', 'unknown')
+            # Comptage topics/points depuis extraction
+            topics_count = 0
+            points_count = 0
 
-            logger.info(f"📊 Analyse meeting: Grade {grade} ({global_score}/100), {len(topics)} topics, méthode {method_used}")
+            if extraction_results:
+                # Compter topics
+                topics = extraction_results.get('topics', {})
+                if isinstance(topics, dict) and 'topics' in topics:
+                    topics_count = len(topics['topics'])
 
-            # Construction analyse avec bienveillance
+                # Compter actions + décisions comme points
+                actions = extraction_results.get('actions', {})
+                if isinstance(actions, dict) and 'actions' in actions:
+                    points_count += len(actions['actions'])
+
+                decisions = extraction_results.get('decisions', {})
+                if isinstance(decisions, dict) and 'decisions' in decisions:
+                    points_count += len(decisions['decisions'])
+
+            logger.info(f"Analyse meeting: Grade {grade} ({global_score}/100), {topics_count} topics, {points_count} points")
+
+            # Construction analyse bienveillante
             analysis = {
                 'strengths': [],
                 'improvements': [],
                 'quality_indicators': {
                     'grade': grade,
                     'global_score': global_score,
-                    'topics_count': len(topics),
-                    'key_points_count': len(points),
-                    'text_length': len(transcription_text),
-                    'extraction_method': method_used
+                    'topics_count': topics_count,
+                    'key_points_count': points_count,
+                    'text_length': len(transcription_text)
                 },
-                'overall_assessment': self._determine_assessment(grade)
+                'overall_assessment': 'excellent' if grade == 'A' else ('good' if grade == 'B' else 'needs_improvement')
             }
 
-            # === POINTS FORTS (approche positive) ===
-            if len(topics) >= 5:
-                analysis['strengths'].append(f"Richesse thématique remarquable ({len(topics)} sujets abordés)")
-            elif len(topics) >= 3:
-                analysis['strengths'].append(f"Bonne diversité des sujets ({len(topics)} topics identifiés)")
+            # Points forts
+            if topics_count >= 3:
+                analysis['strengths'].append(f"Richesse thématique ({topics_count} sujets abordés)")
+            if points_count >= 2:
+                analysis['strengths'].append(f"Contenu actionnable ({points_count} éléments détectés)")
 
-            if len(points) >= 5:
-                analysis['strengths'].append(f"Excellent niveau de contenu ({len(points)} points clés extraits)")
-            elif len(points) >= 2:
-                analysis['strengths'].append(f"Contenu substantiel avec {len(points)} points importants")
+            analysis['strengths'].append("Participation active des membres" if grade == 'D' else "Communication efficace")
 
-            if method_used != 'yake_fallback':
-                analysis['strengths'].append("Qualité suffisante pour analyse LLM avancée")
-            else:
-                analysis['strengths'].append("Résilience technique - extraction réussie malgré les défis")
-
-            # Encouragement selon le grade
-            if grade in ['A', 'B']:
-                analysis['strengths'].append("Communication efficace et bien structurée")
-            elif grade == 'C':
-                analysis['strengths'].append("Base solide avec potentiel d'optimisation")
-            else:  # Grade D
-                analysis['strengths'].append("Participation active des membres (excellent engagement)")
-
-            # === AMÉLIORATIONS SUGGÉRÉES (constructif) ===
+            # Améliorations suggérées
             if grade == 'D':
                 analysis['improvements'].extend([
-                    {
-                        'category': 'Structure',
-                        'suggestion': 'Définir un ordre du jour précis et le respecter',
-                        'reason': 'Discussion riche mais dispersée - plus de cadrage maximisera l\'impact'
-                    },
-                    {
-                        'category': 'Animation',
-                        'suggestion': 'Désigner un facilitateur pour maintenir le focus',
-                        'reason': 'Excellente participation - canaliser cette énergie vers les objectifs'
-                    },
-                    {
-                        'category': 'Décision',
-                        'suggestion': 'Réserver 15min en fin pour synthétiser les décisions',
-                        'reason': 'Beaucoup d\'échanges - les ancrer par des conclusions claires'
-                    }
+                    {'category': 'Structure', 'suggestion': 'Définir un ordre du jour précis'},
+                    {'category': 'Animation', 'suggestion': 'Désigner un facilitateur'},
+                    {'category': 'Décision', 'suggestion': 'Réserver du temps pour les conclusions'}
                 ])
             elif grade == 'C':
                 analysis['improvements'].extend([
-                    {
-                        'category': 'Efficacité',
-                        'suggestion': 'Structurer en blocs thématiques de 15-20 minutes',
-                        'reason': 'Bon contenu - optimiser le timing pour plus d\'impact'
-                    },
-                    {
-                        'category': 'Participation',
-                        'suggestion': 'Encourager la synthèse collective des points clés',
-                        'reason': 'Belle dynamique - la formaliser pour ancrer les apprentissages'
-                    }
-                ])
-            elif grade == 'B':
-                analysis['improvements'].extend([
-                    {
-                        'category': 'Excellence',
-                        'suggestion': 'Ajouter un récapitulatif visuel en temps réel',
-                        'reason': 'Très bon niveau - perfectionner avec des outils visuels'
-                    }
+                    {'category': 'Efficacité', 'suggestion': 'Structurer en blocs thématiques'},
+                    {'category': 'Participation', 'suggestion': 'Encourager la synthèse collective'}
                 ])
 
             return analysis
 
         except Exception as e:
-            logger.error(f"❌ Erreur analyse extraction: {e}")
+            logger.error(f"Erreur analyse extraction: {e}")
             return {
-                'error': str(e),
                 'strengths': ['Tentative d\'analyse courageuse'],
-                'improvements': [{'category': 'Technique', 'suggestion': 'Vérifier format JSON extraction'}],
+                'improvements': [{'category': 'Technique', 'suggestion': 'Vérifier données d\'extraction'}],
+                'quality_indicators': {'grade': 'C', 'global_score': 50, 'topics_count': 0, 'key_points_count': 0},
                 'overall_assessment': 'needs_improvement'
             }
 
-    def _determine_assessment(self, grade: str) -> str:
-        """Détermine l'assessment global selon le grade."""
-        if grade == 'A':
-            return 'excellent'
-        elif grade == 'B':
-            return 'good'
-        else:
-            return 'needs_improvement'
+# === UTILITAIRE AUDIO ===
+def load_audio_data(audio_file: str) -> Optional[str]:
+    """Charge et formate les métriques audio pour le contexte des recommandations."""
+    try:
+        with open(audio_file, 'r') as f:
+            data = json.load(f)
 
-# === CLASSE 2: RecommendationCascade (Dict Enhanced by Qwen) ===
+        analysis = data.get('analysis', {})
+
+        # Extraction des métriques clés pour les recommandations
+        metrics_summary = (
+            f"Durée: {analysis.get('duration_formatted', 'N/A')}, "
+            f"Ratio parole: {analysis.get('speech_ratio', 0)*100:.0f}%, "
+            f"Qualité: {analysis.get('meeting_quality_score', 0)}/100 ({analysis.get('meeting_quality_grade', 'N/A')}), "
+            f"Clarté vocale: {analysis.get('vocal_clarity_score', 0):.2f}"
+        )
+
+        # Recommandations audio existantes
+        audio_reco = analysis.get('recommendations', [])
+        if audio_reco:
+            metrics_summary += f", Observations: {', '.join(audio_reco)}"
+
+        return metrics_summary
+
+    except Exception as e:
+        logger.warning(f"Erreur lecture audio data: {e}")
+        return None
+
+# === CASCADE RECOMMANDATIONS ===
 class RecommendationCascade:
-    """Pipeline de recommandations: Dict Enhanced by LLM Qwen (backbone) + Dict Simple (fallback)."""
+    """Pipeline de recommandations: RAG+LLM → LLM → Dict Enhanced."""
 
     def __init__(self):
         self.dict_engine = MeetingRecommendationEngine()
-        self.recommendation_methods = [
-            {
-                'name': 'dict_enhanced',
-                'function': self._recommend_with_dict_enhanced,
-                'description': 'Dictionnaire enhanced bienveillant (backbone)'
-            },
-            {
-                'name': 'dict_simple',
-                'function': self._recommend_with_dict_simple,
-                'description': 'Dictionnaire simple (fallback)'
-            }
-        ]
-        logger.info("💡 Pipeline recommandations simple: Dict Enhanced + Dict Simple")
+        logger.info("Pipeline RAG-Enhanced: RAG+LLM → LLM → Dict Enhanced")
 
-    def _recommend_with_dict_simple(self, transcription_text: str, quality_analysis: Dict,
-                                  extraction_data: Dict = None) -> Dict:
-        """Fallback dictionnaire simple - version basique."""
+    def _build_enhanced_context(self, extraction_data: Dict, audio_analysis_file: Optional[str] = None) -> str:
+        """Construit contexte enrichi pour RAG."""
+        context_parts = []
+
+        if extraction_data and 'extraction' in extraction_data:
+            extraction = extraction_data['extraction']
+
+            # Type de meeting
+            meeting_type_data = extraction.get('meeting_type', {})
+            if isinstance(meeting_type_data, dict):
+                meeting_type = meeting_type_data.get('meeting_type', 'Général')
+            elif isinstance(meeting_type_data, str):
+                meeting_type = meeting_type_data
+            else:
+                meeting_type = 'Général'
+            context_parts.append(f"TYPE: {meeting_type}")
+
+            # Topics principaux
+            topics = extraction.get('topics', {})
+            if isinstance(topics, dict) and 'topics' in topics:
+                topic_list = topics['topics'][:7]
+                topic_keywords = [t.get('keyword', '') for t in topic_list if isinstance(t, dict) and t.get('keyword')]
+                if topic_keywords:
+                    context_parts.append(f"TOPICS: {', '.join(topic_keywords)}")
+
+            # Actions et décisions
+            actions = extraction.get('actions', {})
+            if isinstance(actions, dict) and 'actions' in actions:
+                actions_count = len(actions['actions'])
+                if actions_count > 0:
+                    context_parts.append(f"ACTIONS: {actions_count} détectées")
+
+            decisions = extraction.get('decisions', {})
+            if isinstance(decisions, dict) and 'decisions' in decisions:
+                decisions_count = len(decisions['decisions'])
+                if decisions_count > 0:
+                    context_parts.append(f"DÉCISIONS: {decisions_count} identifiées")
+
+        # Enrichissement avec analyse audio si disponible
+        if audio_analysis_file:
+            audio_data = load_audio_data(audio_analysis_file)
+            if audio_data:
+                context_parts.append(f"AUDIO: {audio_data}")
+
+        return f"CONTEXTE: {' | '.join(context_parts)}" if context_parts else ""
+
+    def _get_meeting_type(self, extraction_data: Dict) -> str:
+        """Extrait le type de meeting."""
+        if not extraction_data or 'extraction' not in extraction_data:
+            return 'Général'
+
+        meeting_type_data = extraction_data['extraction'].get('meeting_type', {})
+        if isinstance(meeting_type_data, dict):
+            return meeting_type_data.get('meeting_type', 'Général')
+        elif isinstance(meeting_type_data, str):
+            return meeting_type_data
+        return 'Général'
+
+    def get_specialized_prompt_context(self, meeting_type: str) -> str:
+        """Retourne contexte spécialisé selon type meeting."""
+        few_shots_by_type = {
+            'brainstorming': "Brainstorming créatif → Animation: 'Divergence 30min + Convergence', Structure: 'Post-it + Vote dot'",
+            'décisionnelle': "Réunion décision → Efficacité: 'Options A/B/C + Vote + Validation'",
+            'rétrospective': "Rétrospective agile → Structure: 'Start/Stop/Continue + Actions SMART'",
+            'client': "Meeting client → Communication: 'Slides impactants + Démo live + Q&R'",
+            'copil': "Copil stratégique → Efficacité: 'Dashboard KPIs + Points bloquants + Arbitrages'",
+            'standup': "Stand-up quotidien → Animation: 'Tour de table 2min/pers + Actions jour'"
+        }
+
+        return few_shots_by_type.get(meeting_type.lower(),
+                                    "Meeting structuré → Organisation: 'Agenda timing + Objectifs clairs + Synthèse'")
+
+    def _recommend_with_rag_qwen(self, transcription_text: str, quality_analysis: Dict,
+                                 extraction_data: Dict = None, audio_analysis_file: Optional[str] = None) -> Dict:
+        """Méthode 1: RAG + LLM Qwen Enhanced."""
+
         try:
-            grade = quality_analysis.get('quality_indicators', {}).get('grade', 'C')
+            logger.info("RAG + LLM: enrichissement avec contexte leadership...")
 
-            # Recommandations basiques selon grade
-            if grade == 'A':
-                recommendations = [{
-                    'categorie': 'Excellence',
-                    'titre': 'Meeting parfait - Continuez !',
-                    'description': 'Aucune amélioration nécessaire.',
-                    'impact': 'none',
-                    'facilite_implementation': 'immediate',
-                    'source': 'dict_simple'
-                }]
-            elif grade == 'B':
-                recommendations = [{
-                    'categorie': 'Structure',
-                    'titre': 'Petits ajustements structurels',
-                    'description': 'Bon meeting avec potentiel d\'optimisation.',
-                    'impact': 'low',
-                    'facilite_implementation': 'easy',
-                    'source': 'dict_simple'
-                }]
-            else:  # C ou D
-                recommendations = [
-                    {
-                        'categorie': 'Structure',
-                        'titre': 'Améliorer l\'organisation',
-                        'description': 'Structurer davantage le meeting.',
-                        'impact': 'medium',
-                        'facilite_implementation': 'medium',
-                        'source': 'dict_simple'
-                    },
-                    {
-                        'categorie': 'Efficacité',
-                        'titre': 'Optimiser la durée',
-                        'description': 'Meetings plus courts et focalisés.',
-                        'impact': 'medium',
-                        'facilite_implementation': 'easy',
-                        'source': 'dict_simple'
-                    }
-                ]
+            # Enrichissement par le RAG
+            enhanced_data = enhance_qwen_with_rag(transcription_text, extraction_data, quality_analysis)
 
-            conseil_synthese = f"Recommandations simples pour grade {grade}."
+            # Construction contexte enrichi (inclut audio si disponible)
+            enhanced_context = self._build_enhanced_context(extraction_data, audio_analysis_file)
+            meeting_type = self._get_meeting_type(extraction_data)
+            specialized_context = self.get_specialized_prompt_context(meeting_type)
 
-            return {
-                'method': 'dict_simple',
-                'success': True,
-                'recommendations': recommendations,
-                'conseil_synthese': conseil_synthese,
-                'approach': 'dict_simple_basic'
-            }
+            # Enrichissement avec analyse audio si disponible
+            if audio_analysis_file:
+                audio_data = load_audio_data(audio_analysis_file)
+                if audio_data:
+                    enhanced_data['audio_data'] = audio_data
+
+            # Ajout du contexte meeting au RAG
+            enhanced_data['meeting_context'] = enhanced_context
+            enhanced_data['meeting_type'] = meeting_type
+            enhanced_data['specialized_context'] = specialized_context
+
+            # Appel du LLM avec RAG + context meeting
+            result = recommend_and_evaluate_meeting(transcription_text, enhanced_data)
+
+            if result.get('success'):
+                result['method'] = 'rag_enhanced_qwen'
+                result['rag_used'] = 'rag_context' in enhanced_data
+                result['meeting_type_detected'] = meeting_type
+                logger.info(f"RAG + LLM réussi (RAG: {result['rag_used']})")
+                return result
+            else:
+                return {'method': 'rag_enhanced_qwen', 'success': False, 'error': 'qwen_failed'}
 
         except Exception as e:
-            logger.error(f"❌ Erreur Dict Simple: {str(e)}")
-            return {'method': 'dict_simple', 'success': False, 'error': str(e)}
+            logger.warning(f"RAG + LLM échoué: {str(e)}")
+            return {'method': 'rag_enhanced_qwen', 'success': False, 'error': str(e)}
+
+    def _recommend_with_qwen_only(self, transcription_text: str, quality_analysis: Dict,
+                                  extraction_data: Dict = None, audio_analysis_file: Optional[str] = None) -> Dict:
+        """Méthode 2: LLM Qwen avec cascade interne."""
+        try:
+            logger.info("Qwen cascade: génération recommandations...")
+
+            # Enrichissement analyse audio si disponible
+            enhanced_data = extraction_data or {}
+            if audio_analysis_file:
+                audio_data = load_audio_data(audio_analysis_file)
+                if audio_data:
+                    enhanced_data['audio_data'] = audio_data
+                    logger.info("Analyse audio disponible pour enrichissement de la data")
+
+            result = recommend_and_evaluate_meeting(transcription_text, enhanced_data)
+
+            if result.get('success'):
+                result['method'] = 'qwen_cascade'
+                result['rag_used'] = False
+                logger.info("Qwen cascade réussi")
+                return result
+            else:
+                return {'method': 'qwen_cascade', 'success': False, 'error': 'qwen_cascade_failed'}
+
+        except Exception as e:
+            logger.warning(f"Qwen cascade échoué: {str(e)}")
+            return {'method': 'qwen_cascade', 'success': False, 'error': str(e)}
 
     def _recommend_with_dict_enhanced(self, transcription_text: str, quality_analysis: Dict,
-                                    extraction_data: Dict = None) -> Dict:
-        """Fallback recommandations avec dictionnaire enhanced."""
+                                      extraction_data: Dict = None, audio_analysis_file: Optional[str] = None) -> Dict:
+        """Méthode 3: Dict Enhanced (fallback garanti)."""
         try:
-            # Utilisation du moteur de recommandations enhanced
-            extraction_results = extraction_data.get('extraction', {}) if extraction_data else {}
-            recommendations = self.dict_engine.generate_recommendations(quality_analysis, extraction_results)
+            logger.info("Dict Enhanced: génération recommandations...")
 
-            # Message encourageant basé sur les forces
-            strengths = quality_analysis.get('strengths', [])
+            enhanced_data = extraction_data.get('extraction', {}) if extraction_data else {}
+            # Enrichissement analyse audio si disponible
+            if audio_analysis_file:
+                audio_data = load_audio_data(audio_analysis_file)
+                if audio_data:
+                    enhanced_data['audio_data'] = audio_data
+                    logger.info("Analyse audio disponible pour enrichissement de la data")
+
+            recommendations = self.dict_engine.generate_recommendations(quality_analysis, enhanced_data)
+
             grade = quality_analysis.get('quality_indicators', {}).get('grade', 'C')
+            strengths = quality_analysis.get('strengths', [])
 
             if grade == 'A':
                 conseil_synthese = "Meeting exemplaire ! Ces micro-ajustements le rendront parfait."
@@ -386,146 +425,191 @@ class RecommendationCascade:
             else:  # Grade D
                 conseil_synthese = f"Formidable engagement des participants ! Canaliser cette énergie avec ces {len(recommendations)} optimisations."
 
-            return {
+            result = {
                 'method': 'dict_enhanced',
                 'success': True,
-                'recommendations': recommendations,
-                'conseil_synthese': conseil_synthese,
+                'recommendations': {
+                    'recommandations_principales': recommendations,
+                    'resume_conseil': conseil_synthese,
+                    'nb_recommandations': len(recommendations)
+                },
+                'ready_for_implementation': True,
+                'conseil_quality': 'high' if grade in ['A', 'B'] else 'medium',
+                'rag_used': False,
                 'approach': 'dict_enhanced_positive',
-                'grade_detected': grade,
-                'recommendations_count': len(recommendations)
+                'grade_detected': grade
             }
 
+            logger.info(f"Dict Enhanced réussi (grade {grade})")
+            return result
+
         except Exception as e:
-            logger.error(f"❌ Erreur Dict Enhanced: {str(e)}")
+            logger.error(f"Erreur Dict Enhanced: {str(e)}")
             return {'method': 'dict_enhanced', 'success': False, 'error': str(e)}
 
     def recommend(self, transcription_text: str, quality_analysis: Dict,
-                 extraction_data: Dict = None) -> Dict:
-        """Pipeline simple avec approche bienveillante."""
-        logger.info("💡 Démarrage recommandations simples (Dict Enhanced + Dict Simple)")
+                  extraction_data: Dict = None, audio_analysis_file: Optional[str] = None) -> Dict:
+        """Pipeline cascade avec RAG enhanced."""
+        logger.info("Démarrage cascade recommandations RAG-Enhanced")
 
-        recommendation_attempts = []
+        methods = [
+            ('rag_enhanced_qwen', self._recommend_with_rag_qwen, 'RAG + LLM'),
+            ('qwen_cascade', self._recommend_with_qwen_only, 'LLM Qwen cascade'),
+            ('dict_enhanced', self._recommend_with_dict_enhanced, 'Dict Enhanced (garanti)')
+        ]
 
-        for i, method in enumerate(self.recommendation_methods, 1):
-            method_name = method['name']
-            method_func = method['function']
-            method_desc = method['description']
+        attempts = []
 
-            logger.info(f"🧠 Tentative {i}: {method_desc}")
+        for method_name, method_func, method_desc in methods:
+            logger.info(f"Tentative: {method_desc}")
 
             try:
-                result = method_func(transcription_text, quality_analysis, extraction_data)
+                result = method_func(transcription_text, quality_analysis, extraction_data, audio_analysis_file)
 
-                recommendation_attempts.append({
+                attempts.append({
                     'method': method_name,
                     'success': result.get('success', False),
                     'error': result.get('error') if not result.get('success') else None
                 })
 
                 if result.get('success'):
-                    logger.info(f"✅ {method_desc} réussi")
+                    logger.info(f"{method_desc} réussi")
                     result['cascade_method'] = method_name
-                    result['attempts'] = recommendation_attempts
+                    result['attempts'] = attempts
                     return result
 
             except Exception as e:
-                logger.warning(f"⚠️ {method_desc} échoué: {str(e)}")
-                recommendation_attempts.append({
+                logger.warning(f"{method_desc} échoué: {str(e)}")
+                attempts.append({
                     'method': method_name,
                     'success': False,
                     'error': str(e)
                 })
 
-        # Fallback final ultra-positif
+        # Fallback ultime (ne devrait jamais arriver)
+        logger.warning("Toutes méthodes échouées - fallback ultime")
         return {
             'method': 'fallback_ultimate_positive',
             'success': True,
-            'recommendations': [{
-                'categorie': 'Encouragement',
-                'titre': 'Continuer cette excellente dynamique de progression',
-                'description': 'Votre démarche d\'amélioration continue est remarquable ! Chaque meeting est une réussite en soi.',
-                'impact': 'high',
-                'facilite_implementation': 'immediate'
-            }],
-            'conseil_synthese': 'Bravo pour cette analyse ! Votre engagement vers l\'excellence est inspirant.',
+            'recommendations': {
+                'recommandations_principales': [{
+                    'categorie': 'Encouragement',
+                    'titre': 'Continuer cette excellente dynamique de progression',
+                    'description': 'Votre démarche d\'amélioration continue est remarquable !',
+                    'impact': 'high',
+                    'facilite_implementation': 'immediate'
+                }],
+                'resume_conseil': 'Bravo pour cette analyse ! Votre engagement vers l\'excellence est inspirant.',
+                'nb_recommandations': 1
+            },
             'cascade_method': 'fallback_ultimate_positive',
-            'attempts': recommendation_attempts
+            'attempts': attempts
         }
 
-# === CLASSE 3: RecommendationSaver (Sauvegarde harmonisée) ===
+# === SAUVEGARDE ===
 class RecommendationSaver:
-    """Gestionnaire sauvegarde recommandations (pattern harmonisé)."""
+    """Gestionnaire sauvegarde recommandations."""
 
     def __init__(self, output_dir: str = "output/recommendations"):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        logger.info(f"💾 Sauvegarde recommandations: {self.output_dir}")
+        logger.info(f"Sauvegarde recommandations: {self.output_dir}")
 
     def save_results(self, results: Dict) -> str:
         """Sauvegarde recommandations avec timestamp."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        extraction_name = Path(results["extraction_file"]).stem if results.get("extraction_file") else "unknown"
-        method = results["cascade_info"]["method_used"]
+        transcription_name = Path(results.get("transcription_file", "unknown")).stem
+        method = results.get("cascade_info", {}).get("method_used", "unknown")
 
-        filename = f"recommendations_{method}_{extraction_name}_{timestamp}.json"
+        filename = f"recommendations_{method}_{transcription_name}_{timestamp}.json"
         output_path = self.output_dir / filename
 
         try:
             with open(output_path, 'w', encoding='utf-8') as f:
                 json.dump(results, f, indent=2, ensure_ascii=False)
-            logger.info(f"💾 Recommandations sauvées: {output_path}")
+            logger.info(f"Recommandations sauvées: {output_path}")
             return str(output_path)
         except Exception as e:
-            logger.error(f"❌ Erreur sauvegarde: {e}")
+            logger.error(f"Erreur sauvegarde: {e}")
             return ""
 
 # === FONCTION PRINCIPALE ===
-def analyze_and_recommend(extraction_file: str, enable_spot_check: bool = False,
-                         spot_sample_size: int = 3) -> Dict:
-    """
-    Pipeline principal: JSON extraction → Recommandations bienveillantes.
-    """
-    extraction_file = Path(extraction_file)
+def analyze_and_recommend(transcription_file: str, audio_analysis_file: Optional[str] = None,
+                         enable_spot_check: bool = False, spot_sample_size: int = 3) -> Dict:
+    """Pipeline principal: Transcription TXT + Audio Analysis JSON → Recommandations cascade RAG-Enhanced."""
+    transcription_file = Path(transcription_file)
 
-    if not extraction_file.exists():
-        return {"error": "file_not_found", "path": str(extraction_file)}
+    if not transcription_file.exists():
+        return {"error": "file_not_found", "path": str(transcription_file)}
 
-    logger.info(f"💡 Analyse extraction + recommandations: {extraction_file.name}")
+    # Vérification fichier audio optionnel
+    if audio_analysis_file:
+        audio_path = Path(audio_analysis_file)
+        if not audio_path.exists():
+            logger.warning(f"Fichier audio analysis non trouvé: {audio_analysis_file} - continuer sans")
+            audio_analysis_file = None
+
+    logger.info(f"Pipeline recommandations cascade: {transcription_file.name}")
+    if audio_analysis_file:
+        logger.info(f"Audio analysis: {Path(audio_analysis_file).name}")
+
     start_time = datetime.now()
 
-    # 1. Lecture JSON extraction (main_extract.py)
+    # 1. Lecture transcription TXT
     try:
-        with open(extraction_file, 'r', encoding='utf-8') as f:
-            extraction_data = json.load(f)
+        with open(transcription_file, 'r', encoding='utf-8') as f:
+            transcription_text = f.read().strip()
 
-        transcription_text = extraction_data.get('transcription', {}).get('text', '')
         if not transcription_text:
-            return {"error": "no_transcription_text", "file": str(extraction_file)}
+            return {"error": "empty_transcription", "file": str(transcription_file)}
 
-        logger.info(f"📖 Transcription: {len(transcription_text)} chars")
+        logger.info(f"Transcription: {len(transcription_text)} chars")
 
     except Exception as e:
-        logger.error(f"❌ Erreur lecture extraction: {e}")
-        return {"error": "extraction_read_failed", "details": str(e)}
+        logger.error(f"Erreur lecture transcription: {e}")
+        return {"error": "transcription_read_failed", "details": str(e)}
 
-    # 2. Analyse qualité meeting depuis extraction
+    # 2. Extraction contenu meeting pour enrichir le contexte
+    extraction_results = {}
+    try:
+        from src.meeting.extractor import create_meeting_extractor
+        extractor = create_meeting_extractor(
+            extract_topics=True,
+            extract_actions=True,
+            extract_decisions=True,
+            extract_meeting_type=True
+        )
+        extraction_results = extractor.extract_meeting_content(transcription_text)
+        logger.info(f"Extraction réussie: {len(extraction_results)} méthodes")
+
+    except Exception as e:
+        logger.warning(f"Extraction meeting échouée: {e}")
+
+    # Structure pour compatibilité avec RecommendationAnalyzer
+    extraction_data = {
+        "transcription": {
+            "text": transcription_text,
+            "quality_analysis": {"grade": "C", "global_score": 70}
+        },
+        "extraction": extraction_results
+    }
+
+    # 3. Analyse qualité meeting
     analyzer = RecommendationAnalyzer()
     quality_analysis = analyzer.analyze_extraction_quality(extraction_data)
 
-    # 3. Recommandations cascade (LLM + Dict Enhanced)
+    # 4. Recommandations cascade RAG-Enhanced (avec audio)
     cascade = RecommendationCascade()
-    recommendation_result = cascade.recommend(transcription_text, quality_analysis, extraction_data)
+    recommendation_result = cascade.recommend(transcription_text, quality_analysis, extraction_data, audio_analysis_file)
 
-    # 4. Spot-check strategic (optionnel)
+    # 5. Spot-check strategic (optionnel)
     strategic_spotcheck = {}
     if enable_spot_check:
         try:
             spot_checker = SpotChecker(sample_size=spot_sample_size)
-            # Mots-clés depuis recommandations
             reco_text = ' '.join([str(r) for r in recommendation_result.get('recommendations', [])])
             samples = spot_checker.strategic_sample(transcription_text,
-                                                  ['recommandation', 'amélioration', 'conseil'],
+                                                  ['recommendation', 'amélioration', 'conseil'],
                                                   context_window=400)
             if samples:
                 spot_file = spot_checker.save_samples_for_annotation(samples)
@@ -535,20 +619,41 @@ def analyze_and_recommend(extraction_file: str, enable_spot_check: bool = False,
                     "spot_check_file": spot_file
                 }
         except Exception as e:
-            logger.warning(f"⚠️ SpotCheck échoué: {e}")
+            logger.warning(f"SpotCheck échoué: {e}")
 
     total_duration = (datetime.now() - start_time).total_seconds()
 
+    # Extraction métriques finales
+    topics_found = 0
+    actions_found = 0
+    meeting_type = 'Général'
+
+    if extraction_results:
+        topics = extraction_results.get('topics', {})
+        if isinstance(topics, dict) and 'topics' in topics:
+            topics_found = len(topics['topics'])
+
+        actions = extraction_results.get('actions', {})
+        if isinstance(actions, dict) and 'actions' in actions:
+            actions_found = len(actions['actions'])
+
+        meeting_type_data = extraction_results.get('meeting_type', {})
+        if isinstance(meeting_type_data, dict):
+            meeting_type = meeting_type_data.get('meeting_type', 'Général')
+        elif isinstance(meeting_type_data, str):
+            meeting_type = meeting_type_data
+
     # Résultats consolidés
     return {
-        'extraction_file': str(extraction_file),
+        'transcription_file': str(transcription_file),
+        'audio_analysis_file': audio_analysis_file,
         'analysis_timestamp': datetime.now().isoformat(),
         'total_duration': total_duration,
 
-        # Analyse qualité depuis extraction
+        # Analyse qualité
         'quality_analysis': quality_analysis,
 
-        # Recommandations
+        # Recommandations RAG-Enhanced
         'recommendations': recommendation_result,
         'cascade_info': {
             'method_used': recommendation_result.get('cascade_method', 'unknown'),
@@ -557,22 +662,34 @@ def analyze_and_recommend(extraction_file: str, enable_spot_check: bool = False,
         },
 
         # Context enrichi
-        'extraction_enriched': True,
-        'strategic_spotcheck': strategic_spotcheck if strategic_spotcheck else {}
+        'extraction_enriched': bool(extraction_results),
+        'audio_enriched': audio_analysis_file is not None,
+        'strategic_spotcheck': strategic_spotcheck,
+
+        # Métriques extraction
+        'extraction_metrics': {
+            'topics_found': topics_found,
+            'actions_found': actions_found,
+            'meeting_type': meeting_type
+        }
     }
 
+# === AFFICHAGE RÉSULTATS ===
 def print_results_summary(results: Dict):
     """Affichage bienveillant des résultats."""
     print("\n" + "="*70)
-    print("💡 SUMMORA V3 - RECOMMANDATIONS BIENVEILLANTES")
+    print("SUMMORA V3 - RECOMMANDATIONS RAG-ENHANCED")
     print("="*70)
 
     # Infos générales
-    extraction_file = Path(results["extraction_file"]).name
+    transcription_file = Path(results["transcription_file"]).name
+    audio_file = results.get("audio_analysis_file")
     quality_analysis = results["quality_analysis"]
 
-    print(f"\n📁 Meeting analysé: {extraction_file}")
-    print(f"⏱️ Temps analyse: {results['total_duration']:.2f}s")
+    print(f"\nMeeting analysé: {transcription_file}")
+    if audio_file:
+        print(f"Audio analysis: {Path(audio_file).name}")
+    print(f"Temps analyse: {results['total_duration']:.2f}s")
 
     # Grade et score
     indicators = quality_analysis.get('quality_indicators', {})
@@ -581,69 +698,97 @@ def print_results_summary(results: Dict):
     topics_count = indicators.get('topics_count', 0)
     points_count = indicators.get('key_points_count', 0)
 
-    print(f"📊 Grade meeting: {grade} ({score}/100)")
-    print(f"🎯 Contenu: {topics_count} topics, {points_count} points clés")
+    print(f"Grade meeting: {grade} ({score}/100)")
+    print(f"Contenu: {topics_count} topics, {points_count} points clés")
+    if results.get('audio_enriched'):
+        print("✅ Enrichi avec analyse audio")
 
-    # Points forts (encouragement)
+    # Points forts
     strengths = quality_analysis.get('strengths', [])
     if strengths:
-        print(f"\n🌟 POINTS FORTS IDENTIFIÉS:")
+        print(f"\nPOINTS FORTS IDENTIFIÉS:")
         for i, strength in enumerate(strengths, 1):
             print(f"   {i}. {strength}")
 
     # Recommandations
     recommendations_data = results["recommendations"]
     if recommendations_data.get('success'):
-        recommendations = recommendations_data.get('recommendations', [])
-        conseil_synthese = recommendations_data.get('conseil_synthese', '')
+        recommendations = recommendations_data.get('recommendations', {}).get('recommandations_principales', [])
+        conseil_synthese = recommendations_data.get('recommendations', {}).get('resume_conseil', '')
+        method_used = results.get('cascade_info', {}).get('method_used', 'unknown')
 
-        print(f"\n💡 RECOMMANDATIONS D'AMÉLIORATION:")
+        print(f"\nRECOMMANDATIONS ({method_used.upper()}):")
         for i, reco in enumerate(recommendations[:5], 1):
             if isinstance(reco, dict):
                 title = reco.get('titre', reco.get('description', ''))[:60]
                 category = reco.get('categorie', 'Conseil')
                 print(f"   {i}. [{category}] {title}")
-            else:
-                print(f"   {i}. {str(reco)[:60]}")
 
         if conseil_synthese:
-            print(f"\n💭 Message d'encouragement:")
+            print(f"\nMessage d'encouragement:")
             print(f"   {conseil_synthese}")
 
-    # Méthode utilisée
-    cascade_info = results.get('cascade_info', {})
-    method_used = cascade_info.get('method_used', 'unknown')
-    print(f"\n🔧 Méthode: {method_used}")
-
-    # Assessment global selon grade
-    if grade == 'A':
-        print(f"\n🏆 Meeting d'excellence - Bravo !")
-    elif grade == 'B':
-        print(f"\n👍 Bon meeting - Quelques optimisations simples le rendront parfait")
-    elif grade == 'C':
-        print(f"\n🌱 Meeting avec potentiel - Ces améliorations feront la différence")
-    else:  # Grade D
-        print(f"\n🚀 Excellent engagement détecté - Canaliser cette énergie maximisera l'impact")
+        # Indication RAG
+        if recommendations_data.get('rag_used'):
+            print(f"\nEnrichi avec documents leadership")
 
     print("="*70)
 
+def _print_reco_only_summary(results: Dict):
+    """Affichage compact pour mode --reco-only."""
+    print("\n" + "="*50)
+    print("RECOMMANDATIONS CASCADE (RAG + LLM + Context)")
+    print("="*50)
+
+    # Métriques rapides
+    cascade_info = results.get('cascade_info', {})
+    method_used = cascade_info.get('method_used', 'unknown')
+    extraction_metrics = results.get('extraction_metrics', {})
+    meeting_type = extraction_metrics.get('meeting_type', 'Général')
+    audio_enriched = "✅ Audio" if results.get('audio_enriched') else ""
+
+    print(f"Méthode utilisée: {method_used}")
+    print(f"Type meeting: {meeting_type} {audio_enriched}")
+    print(f"Durée: {results.get('total_duration', 0):.2f}s")
+
+    # Recommandations
+    recommendations_data = results.get('recommendations', {})
+    if recommendations_data.get('success'):
+        recommendations = recommendations_data.get('recommendations', {}).get('recommandations_principales', [])
+        resume_conseil = recommendations_data.get('recommendations', {}).get('resume_conseil', '')
+
+        print(f"\nRECOMMANDATIONS ({len(recommendations)}):")
+        for i, reco in enumerate(recommendations[:8], 1):
+            if isinstance(reco, dict):
+                category = reco.get('categorie', 'Conseil')
+                title = reco.get('titre', reco.get('description', ''))[:70]
+                impact = reco.get('impact', 'medium')
+                print(f"   {i}. [{category}] {title} (Impact: {impact})")
+
+        if resume_conseil:
+            print(f"\nConseil prioritaire:")
+            print(f"   {resume_conseil}")
+
+    print("="*50)
+
+# === CLI PRINCIPAL ===
 def main():
-    """Interface CLI harmonisée."""
+    """Interface CLI simplifiée."""
     parser = argparse.ArgumentParser(
-        description="Summora V3 - Recommandations Bienveillantes Meeting (Input: JSON extraction)",
+        description="Summora V3 - Recommandations cascade RAG-Enhanced",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Exemples d'usage:
-python scripts/main_reco.py extraction.json                    # Analyse basique
-python scripts/main_reco.py extraction.json --reco-only       # Mode rapide
-python scripts/main_reco.py extraction.json --enable-spot-check  # Avec QA
-
-Input: JSON de main_extract.py (obligatoire)
+python scripts/main_reco.py transcription.txt                           # Analyse complète avec sauvegarde
+python scripts/main_reco.py transcription.txt --audio-data audio_analysis.json  # Avec analyse audio
+python scripts/main_reco.py transcription.txt --reco-only              # Recommandations seulement (RAG + LLM + Context)
+python scripts/main_reco.py transcription.txt --enable-spot-check       # Avec QA spot-check
         """
     )
 
-    parser.add_argument("extraction_file", help="Fichier JSON extraction (main_extract.py)")
-    parser.add_argument("--reco-only", action="store_true", help="Mode recommandations rapide")
+    parser.add_argument("transcription_file", help="Fichier transcription TXT")
+    parser.add_argument("--audio-data", help="Fichier analyse audio JSON (optionnel)")
+    parser.add_argument("--reco-only", action="store_true", help="Mode recommandations seulement (pas de sauvegarde)")
     parser.add_argument("--enable-spot-check", action="store_true", help="Active spot-check QA")
     parser.add_argument("--spot-sample", type=int, default=3, help="Échantillons spot-check")
     parser.add_argument("--output", "-o", help="Répertoire de sortie")
@@ -659,66 +804,70 @@ Input: JSON de main_extract.py (obligatoire)
     elif args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    # Vérification fichier
-    if not Path(args.extraction_file).exists():
-        logger.error(f"❌ Fichier extraction non trouvé: {args.extraction_file}")
-        sys.exit(1)
+    # Vérification fichier transcription
+    transcription_path = Path(args.transcription_file)
+    if not transcription_path.exists():
+        logger.error(f"Fichier non trouvé: {args.transcription_file}")
+        return 1
+
+    if not transcription_path.suffix.lower() == '.txt':
+        logger.error(f"Format non supporté: {transcription_path.suffix}. Utilisez un fichier .txt")
+        return 1
+
+    # Vérification fichier audio optionnel
+    audio_analysis_file = None
+    if args.audio_data:
+        audio_path = Path(args.audio_data)
+        if not audio_path.exists():
+            logger.error(f"Fichier audio analysis non trouvé: {args.audio_data}")
+            return 1
+        if not audio_path.suffix.lower() == '.json':
+            logger.error(f"Format audio analysis non supporté: {audio_path.suffix}. Utilisez un fichier .json")
+            return 1
+        audio_analysis_file = str(audio_path)
+        logger.info(f"Audio analysis: {audio_path.name}")
 
     try:
-        # Mode rapide (Dict Enhanced seulement)
-        if args.reco_only:
-            logger.info("💡 Mode recommandations rapide (Dict Enhanced)")
-            # Lecture JSON
-            with open(args.extraction_file, 'r', encoding='utf-8') as f:
-                extraction_data = json.load(f)
-
-            # Analyse qualité + Dict Enhanced direct
-            analyzer = RecommendationAnalyzer()
-            quality_analysis = analyzer.analyze_extraction_quality(extraction_data)
-
-            dict_engine = MeetingRecommendationEngine()
-            recommendations = dict_engine.generate_recommendations(
-                quality_analysis,
-                extraction_data.get('extraction', {})
-            )
-
-            # Affichage rapide
-            grade = quality_analysis.get('quality_indicators', {}).get('grade', 'C')
-            print(f"🎯 Grade: {grade} | {len(recommendations)} recommandations générées")
-            for i, reco in enumerate(recommendations, 1):
-                print(f"  {i}. [{reco['categorie']}] {reco['titre']}")
-
-            return 0
-
-        # Pipeline complet
+        # Pipeline cascade complet
         results = analyze_and_recommend(
-            args.extraction_file,
+            str(transcription_path),
+            audio_analysis_file=audio_analysis_file,
             enable_spot_check=args.enable_spot_check,
             spot_sample_size=args.spot_sample
         )
 
         if "error" in results:
-            logger.error(f"❌ Erreur pipeline: {results['error']}")
-            sys.exit(1)
+            logger.error(f"Erreur pipeline: {results['error']}")
+            return 1
 
-        # Sauvegarde
+        # Mode reco-only : affichage compact sans sauvegarde
+        if args.reco_only:
+            _print_reco_only_summary(results)
+            return 0
+
+        # Mode complet : sauvegarde + affichage
         if not args.no_save:
             output_dir = args.output or "output/recommendations"
             saver = RecommendationSaver(output_dir)
             saved_file = saver.save_results(results)
+            if saved_file:
+                logger.info(f"Fichier sauvé: {saved_file}")
 
-        # Affichage
         if not args.quiet:
             print_results_summary(results)
 
         return 0
 
     except KeyboardInterrupt:
-        logger.info("🛑 Analyse interrompue")
-        sys.exit(1)
+        logger.info("Analyse interrompue")
+        return 1
     except Exception as e:
-        logger.error(f"❌ Erreur fatale: {e}")
-        sys.exit(1)
+        logger.error(f"Erreur fatale: {e}")
+        if args.verbose:
+            import traceback
+            traceback.print_exc()
+        return 1
+
 
 if __name__ == "__main__":
     sys.exit(main())

@@ -1,6 +1,7 @@
 """
 Extracteur LLM Qwen enrichi par l'intelligence YAKE
 Utilise les stopwords et vocabulaire business de YAKE pour guider Qwen
+REFACTO : centralisation avec llm_config.py
 """
 import json
 import os
@@ -18,6 +19,7 @@ sys.path.append(str(Path(__file__).parent.parent.parent))
 # Imports Summora pour enrichissement YAKE
 from src.meeting.extractor import MeetingContentExtractor, MeetingExtractionConfig
 from src.core.business_vocabulary import BUSINESS_KEYWORDS
+from src.config.llm_config import MODELS, PROMPTS, config
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -33,26 +35,26 @@ class QwenEnhancedExtractor:
 
     def __init__(self, api_key: Optional[str] = None):
         if api_key is None:
-            api_key = os.getenv('OPENROUTER_API_KEY')
+            api_key = config.openrouter_api_key
 
         if not api_key:
             raise ValueError("Clé API OpenRouter requise")
 
         self.client = OpenAI(
-            api_key=api_key,
-            base_url="https://openrouter.ai/api/v1"
+            api_key=api_key
+            ,base_url=config.base_url
         )
 
         # Modèles LLM
-        self.extractor_model = "qwen/qwen3-235b-a22b:free"
-        self.judge_model = "tngtech/deepseek-r1t-chimera:free"
+        self.extractor_model = MODELS['extraction_enhanced']
+        self.judge_model = MODELS['judge_primary']
 
         # Extracteur YAKE pour preprocessing
         yake_config = MeetingExtractionConfig(
-            use_business_vocabulary=True,
-            use_enhanced_stopwords=True,
-            extract_actions=True,
-            extract_decisions=True
+            use_business_vocabulary=True
+            ,use_enhanced_stopwords=True
+            ,extract_actions=True
+            ,extract_decisions=True
         )
         self.yake_extractor = MeetingContentExtractor(yake_config)
 
@@ -69,10 +71,10 @@ class QwenEnhancedExtractor:
 
             # Extraction des éléments pertinents
             context = {
-                "business_topics": [],
-                "action_indicators": [],
-                "decision_indicators": [],
-                "business_density": 0
+                "business_topics": []
+                ,"action_indicators": []
+                ,"decision_indicators": []
+                ,"business_density": 0
             }
 
             # Topics business détectés par YAKE
@@ -108,47 +110,6 @@ class QwenEnhancedExtractor:
             logger.warning(f"⚠️ Erreur extraction YAKE: {e}")
             return {"business_topics": [], "action_indicators": [], "decision_indicators": [], "business_density": 0}
 
-    def _build_enhanced_prompt(self, transcription: str, yake_context: Dict) -> str:
-
-        business_categories = {
-            'actions': BUSINESS_KEYWORDS.get('actions', [])[:8],
-            'decisions': BUSINESS_KEYWORDS.get('decisions', [])[:8],
-            'planning': BUSINESS_KEYWORDS.get('planning', [])[:5]
-        }
-
-        return f"""Tu es expert en analyse de réunions d'entreprise.
-
-CONTEXTE DETECTÉ :
-- Topics business : {', '.join(yake_context['business_topics'][:5])}
-- Actions identifiées : {len(yake_context['action_indicators'])}
-
-Analyse cette transcription :
-{transcription}
-
-Réponds EXACTEMENT dans ce format :
-
-TOPICS PRINCIPAUX:
-1. [topic business 1]
-2. [topic business 2]
-3. [topic business 3]
-4. [topic business 4]
-5. [topic business 5]
-
-POINTS CLÉS:
-- [point actionnable 1]
-- [point actionnable 2]
-- [point actionnable 3]
-- [point actionnable 4]
-- [point actionnable 5]
-- [point actionnable 6]
-- [point actionnable 7]
-- [point actionnable 8]
-- [point actionnable 9]
-- [point actionnable 10]
-
-RÉSUMÉ:
-[Synthèse en 2-3 phrases de cette réunion]"""
-
     def extract_meeting_insights_enhanced(self, transcription: str) -> Dict:
         """
         Extraction enrichie par l'intelligence YAKE + Qwen.
@@ -160,19 +121,20 @@ RÉSUMÉ:
         yake_context = self._extract_yake_context(transcription)
 
         # 2. Prompt enrichi
-        enhanced_prompt = self._build_enhanced_prompt(transcription, yake_context)
+        enhanced_prompt = PROMPTS['extraction_hybrid'](transcription, yake_context)
 
         # 3. Extraction LLM
         try:
             response = self.client.chat.completions.create(
-                model=self.extractor_model,
-                messages=[{"role": "user", "content": enhanced_prompt}],
-                max_tokens=50000,
-                temperature=0.1
+                model=self.extractor_model
+                ,messages=[{"role": "user", "content": enhanced_prompt}]
+                ,max_tokens=config.max_tokens
+                ,temperature=config.temperature
             )
 
             duration = time.time() - start_time
             result = response.choices[0].message.content
+            logger.info(f"RAW RESPONSE: '{result[:200]}'")
 
             logger.info(f"✅ Extraction Qwen+YAKE terminée en {duration:.2f}s")
 
@@ -180,33 +142,33 @@ RÉSUMÉ:
             try:
                 parsed_result = json.loads(result)
                 return {
-                    "success": True,
-                    "data": parsed_result,
-                    "yake_context": yake_context,
-                    "enhancement_used": True,
-                    "metrics": {
-                        "duration": duration,
-                        "model": self.extractor_model,
-                        "yake_topics_used": len(yake_context['business_topics']),
-                        "business_density": yake_context['business_density']
+                    "success": True
+                    ,"data": parsed_result
+                    ,"yake_context": yake_context
+                    ,"enhancement_used": True
+                    ,"metrics": {
+                        "duration": duration
+                        ,"model": self.extractor_model
+                        ,"yake_topics_used": len(yake_context['business_topics'])
+                        ,"business_density": yake_context['business_density']
                     }
                 }
             except json.JSONDecodeError as e:
                 logger.error(f"❌ Erreur parsing JSON: {e}")
                 return {
-                    "success": False,
-                    "error": "json_parsing_failed",
-                    "raw_content": result,
-                    "yake_context": yake_context
+                    "success": False
+                    ,"error": "json_parsing_failed"
+                    ,"raw_content": result
+                    ,"yake_context": yake_context
                 }
 
         except Exception as e:
             logger.error(f"❌ Erreur extraction Qwen+YAKE: {str(e)}")
             return {
-                "success": False,
-                "error": str(e),
-                "yake_context": yake_context,
-                "metrics": {"duration": time.time() - start_time}
+                "success": False
+                ,"error": str(e)
+                ,"yake_context": yake_context
+                ,"metrics": {"duration": time.time() - start_time}
             }
 
     def judge_enhanced_extraction(self, transcription: str, extraction_data: Dict, yake_context: Dict) -> Dict:
@@ -215,58 +177,108 @@ RÉSUMÉ:
         """
         extraction_insights = extraction_data.get("insights_business", {})
 
-        prompt = f"""Tu es expert en évaluation d'extraction de réunions business.
+        prompt = prompt = f"""Tu es un expert en évaluation d'extraction de réunions.
+**INSTRUCTIONS STRICTES :**
+- Réponds **UNIQUEMENT** avec un JSON valide, sans balises Markdown, sans commentaires, sans introduction.
+- **Personnalise les scores et justifications** en fonction du contenu réel de la transcription et de l'extraction.
+- Ne répète **JAMAIS** les mêmes scores ou justifications pour des extractions différentes.
 
-CONTEXTE YAKE ORIGINAL :
-- Topics business : {yake_context['business_topics'][:3]}
-- Densité business : {yake_context['business_density']:.1f}%
+**EXEMPLES DE RÉPONSES (few-shot) :**
+1. **Exemple 1 (Extraction de haute qualité) :**
+   {{
+       "pertinence_business": 95,
+       "completude": 98,
+       "actionnabilite": 90,
+       "score_global": 94,
+       "coherence_yake": 95,
+       "justification": "L'extraction couvre tous les points clés de la réunion, y compris les décisions actionnables et les détails contextuels. Les topics YAKE sont parfaitement alignés avec le contenu."
+   }}
 
-EXTRACTION À ÉVALUER :
-Topics: {extraction_data.get('topics_principaux', [])}
-Points clés: {extraction_data.get('points_a_retenir', [])[:5]}
-Actions clés: {extraction_insights.get('actions_cles', [])}
-Décisions: {extraction_insights.get('decisions_prises', [])}
+2. **Exemple 2 (Extraction moyenne) :**
+   {{
+       "pertinence_business": 70,
+       "completude": 65,
+       "actionnabilite": 75,
+       "score_global": 70,
+       "coherence_yake": 80,
+       "justification": "L'extraction manque certains détails importants sur les prochaines étapes, mais les topics principaux sont correctement identifiés. La cohérence avec YAKE est bonne, mais incomplète."
+   }}
 
-TRANSCRIPTION (extrait) :
+3. **Exemple 3 (Extraction de faible qualité) :**
+   {{
+       "pertinence_business": 50,
+       "completude": 40,
+       "actionnabilite": 30,
+       "score_global": 40,
+       "coherence_yake": 60,
+       "justification": "L'extraction est superficielle et ne reflète pas les discussions clés. Les points actionnables sont absents et les topics YAKE ne sont pas bien exploités."
+   }}
+
+**CRITÈRES D'ÉVALUATION (score 0-100) :**
+- **Pertinence business** : Les topics reflètent-ils les enjeux business de la réunion ?
+- **Complétude** : Tous les points importants sont-ils couverts ?
+- **Actionnabilité** : Les points extraits sont-ils exploitables pour des actions concrètes ?
+- **Cohérence YAKE** : Les topics YAKE sont-ils bien intégrés et pertinents ?
+- **Score global** : Moyenne pondérée des critères ci-dessus.
+
+**CONTEXTE YAKE ORIGINAL :**
+- Topics business : {yake_context.get('business_topics', [])[:3]}
+- Densité business : {yake_context.get('business_density', 0):.1f}%
+- Actions identifiées : {len(yake_context.get('action_indicators', []))}
+- Décisions identifiées : {len(yake_context.get('decision_indicators', []))}
+
+**DONNÉES À ÉVALUER :**
+- TRANSCRIPTION ORIGINALE (extrait) :
 {transcription[:2000]}...
 
-Évalue selon ces critères (score 0-100) :
-- **Pertinence business** : Cohérence avec contexte YAKE
-- **Complétude** : Couverture des éléments importants
-- **Actionnabilité** : Qualité des actions/décisions extraites
+- EXTRACTION À ÉVALUER :
+Topics: {extraction_data.get('topics_principaux', [])}
+Points clés: {extraction_data.get('points_a_retenir', [])[:5]}...
+Résumé: {extraction_data.get('resume_abstractif', '')[:200]}...
 
-JSON uniquement :
+- INSIGHTS BUSINESS :
+Actions clés: {extraction_insights.get('actions_cles', [])}
+Décisions prises: {extraction_insights.get('decisions_prises', [])}
+
+**FORMAT DE RÉPONSE OBLIGATOIRE :**
 {{
-    "pertinence_business": 85,
-    "completude": 90,
-    "actionnabilite": 88,
-    "score_global": 88,
-    "coherence_yake": 92,
-    "justification": "Excellente extraction enrichie qui exploite bien le contexte YAKE..."
-}}"""
+    "pertinence_business": [score],
+    "completude": [score],
+    "actionnabilite": [score],
+    "score_global": [score],
+    "coherence_yake": [score],
+    "justification": "[Justification DÉTAILLÉE analysant la cohérence entre YAKE, extraction et insights business]"
+}}
+
+**RÈGLE ABSOLUE :**
+- Commence ta réponse **immédiatement** par le JSON, sans espace ni saut de ligne avant.
+- **Adapte les scores et justifications** en fonction du contenu réel. Ne copie jamais les exemples.
+"""
+
 
         logger.info("⚖️ Évaluation enrichie par Judge...")
         start_time = time.time()
 
         try:
             response = self.client.chat.completions.create(
-                model=self.judge_model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=1000,
-                temperature=0.1
+                model=self.judge_model
+                ,messages=[{"role": "user", "content": prompt}]
+                ,max_tokens=config.judge_max_tokens
+                ,temperature=config.temperature
             )
 
             duration = time.time() - start_time
             result = response.choices[0].message.content
+            logger.info(f"JUDGE RAW RESPONSE: '{result[:200]}'")
 
             logger.info(f"📊 Judge response ({len(result)} chars): {result[:100]}...")
 
             if not result.strip():
                 logger.error("❌ Judge a retourné une réponse vide")
                 return {
-                    "success": False,
-                    "error": "empty_response",
-                    "metrics": {"duration": duration}
+                    "success": False
+                    ,"error": "empty_response"
+                    ,"metrics": {"duration": duration}
                 }
 
             try:
@@ -293,27 +305,27 @@ JSON uniquement :
                 judge_scores = json.loads(result_cleaned)
                 logger.info(f"✅ Judge enrichi terminé en {duration:.2f}s - Score global: {judge_scores.get('score_global', 'N/A')}")
                 return {
-                    "success": True,
-                    "scores": judge_scores,
-                    "enhancement_evaluated": True,
-                    "metrics": {"duration": duration, "model": self.judge_model}
+                    "success": True
+                    ,"scores": judge_scores
+                    ,"enhancement_evaluated": True
+                    ,"metrics": {"duration": duration, "model": self.judge_model}
                 }
             except json.JSONDecodeError as e:
                 logger.error(f"❌ Judge JSON parsing failed: {e}")
                 logger.error(f"📋 Raw response: {result}")
                 return {
-                    "success": False,
-                    "error": "json_parsing_failed",
-                    "raw_content": result,
-                    "metrics": {"duration": duration}
+                    "success": False
+                    ,"error": "json_parsing_failed"
+                    ,"raw_content": result
+                    ,"metrics": {"duration": duration}
                 }
 
         except Exception as e:
             logger.error(f"❌ Erreur judge enrichi: {str(e)}")
             return {
-                "success": False,
-                "error": str(e),
-                "metrics": {"duration": time.time() - start_time}
+                "success": False
+                ,"error": str(e)
+                ,"metrics": {"duration": time.time() - start_time}
             }
 
 # Fonction utilitaire
@@ -328,27 +340,27 @@ def extract_with_qwen_enhanced(transcription: str) -> Dict:
 
     if not extraction_result["success"]:
         return {
-            "method": "qwen_enhanced_by_yake",
-            "success": False,
-            "error": extraction_result["error"],
-            "yake_context": extraction_result.get("yake_context", {})
+            "method": "qwen_enhanced_by_yake"
+            ,"success": False
+            ,"error": extraction_result["error"]
+            ,"yake_context": extraction_result.get("yake_context", {})
         }
 
     # Évaluation enrichie
     judge_result = extractor.judge_enhanced_extraction(
-        transcription,
-        extraction_result["data"],
-        extraction_result["yake_context"]
+        transcription
+        ,extraction_result["data"]
+        ,extraction_result["yake_context"]
     )
 
     return {
-        "method": "qwen_enhanced_by_yake",
-        "success": True,
-        "extraction": extraction_result["data"],
-        "yake_context": extraction_result["yake_context"],
-        "quality_scores": judge_result.get("scores", {}),
-        "metrics": extraction_result["metrics"],
-        "enhancement_used": True
+        "method": "qwen_enhanced_by_yake"
+        ,"success": True
+        ,"extraction": extraction_result["data"]
+        ,"yake_context": extraction_result["yake_context"]
+        ,"quality_scores": judge_result.get("scores", {})
+        ,"metrics": extraction_result["metrics"]
+        ,"enhancement_used": True
     }
 
 # Test

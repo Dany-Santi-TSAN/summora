@@ -6,7 +6,6 @@ Usage: python scripts/main_extract.py transcription.txt --with-eval --enable-spo
 """
 import argparse
 import logging
-import re
 import sys
 import json
 from pathlib import Path
@@ -48,7 +47,7 @@ class ExtractionCascade:
             {
                 'name': 'llm_fallback_extractor'
                 ,'function': extract_with_fallback_llm
-                ,'description': f'LLM : {self.llm_fallback_extractor.extractor_model_name} - version gratuite (fallback)' # j'essaie de changer ici
+                ,'description': f'LLM : {self.llm_fallback_extractor.extractor_model_name} - version gratuite (fallback)'
             },
             {
                 'name': 'yake_fallback'

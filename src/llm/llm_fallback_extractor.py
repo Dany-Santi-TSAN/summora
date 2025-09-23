@@ -1,6 +1,7 @@
 """
 Extracteur LLM Qwen pour analyse de réunions
 Module spécialisé pour l'extraction d'insights business
+REFACTO : utilisation de la config centralisée llm_config.py
 """
 import json
 import os
@@ -10,6 +11,15 @@ import logging
 from typing import Dict, Optional
 from openai import OpenAI
 from dotenv import load_dotenv
+from pathlib import Path
+import sys
+
+# Path setup pour imports
+sys.path.append(str(Path(__file__).parent.parent.parent))
+
+# Imports SUMMORA
+from src.config.llm_config import MODELS, PROMPTS, config
+
 
 # Charge les variables d'environnement depuis .env
 load_dotenv()
@@ -27,21 +37,21 @@ class FallBackExtractor:
             api_key: Clé API OpenRouter (ou depuis .env)
         """
         if api_key is None:
-            api_key = os.getenv('OPENROUTER_API_KEY')
+            api_key = config.openrouter_api_key
 
         if not api_key:
             raise ValueError("Clé API OpenRouter requise (OPENROUTER_API_KEY en env)")
 
         self.client = OpenAI(
             api_key=api_key,
-            base_url="https://openrouter.ai/api/v1"
+            base_url=config.base_url
         )
 
         # Modèles pour extraction
-        self.extractor_model = "meta-llama/llama-3.2-3b-instruct:free"
+        self.extractor_model = MODELS['extraction_fallback']
         self.extractor_model_name = self._extract_model_short_name(self.extractor_model)
-        self.judge_model = "tngtech/deepseek-r1t-chimera:free"
-        self.fallback_judge = "nousresearch/deephermes-3-llama-3-8b-preview:free"
+        self.judge_model = MODELS['judge_primary']
+        self.fallback_judge = MODELS['judge_fallback']
 
     def _extract_model_short_name(self, full_model_name: str) -> str:
         """Extrait un nom court et lisible depuis le nom de modèle OpenRouter."""
@@ -57,33 +67,17 @@ class FallBackExtractor:
         """
         Extraction business intelligence avec prompt validé.
         """
-        prompt = f"""Tu es expert en analyse de réunions d'entreprise et extraction d'insights business.
+        prompt = PROMPTS['extraction_hybrid'](transcription)
 
-Analyse cette transcription de réunion et génère :
-
-1. **5 topics principaux** (thèmes clés abordés dans la réunion)
-2. **10 bullet points importants** (décisions, actions, points à retenir)
-3. **Résumé abstractif** (1 paragraphe synthèse des enseignements/décisions clés)
-
-Transcription de réunion à analyser :
-{transcription}
-
-Format JSON uniquement :
-{{
-    "topics_principaux": ["topic1", "topic2", "topic3", "topic4", "topic5"],
-    "points_a_retenir": ["point1", "point2", "point3", "point4", "point5", "point6", "point7", "point8", "point9", "point10"],
-    "resume_abstractif": "Synthèse des enseignements et décisions clés de cette réunion en 1 paragraphe..."
-}}"""
-
-        logger.info(f"🧠 Extraction Qwen - Input: {len(transcription)} chars")
+        logger.info(f"🧠 Extraction Fallback - Input: {len(transcription)} chars")
         start_time = time.time()
 
         try:
             response = self.client.chat.completions.create(
-                model=self.extractor_model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=50000,
-                temperature=0.1
+                model=self.extractor_model
+                ,messages=[{"role": "user", "content": prompt}]
+                ,max_tokens=config.max_tokens
+                ,temperature=config.temperature
             )
 
             duration = time.time() - start_time
@@ -126,33 +120,8 @@ Format JSON uniquement :
         """
         Évaluation de la qualité de l'extraction par LLM Judge.
         """
-        topics = extraction_data.get("topics_principaux", [])
-        points = extraction_data.get("points_a_retenir", [])
-        resume = extraction_data.get("resume_abstractif", "")
 
-        prompt = f"""Tu es expert en évaluation de qualité d'extraction de réunions.
-
-Évalue cette extraction selon ces critères (score 0-100) :
-- **Pertinence** : Les topics reflètent-ils bien le contenu ?
-- **Complétude** : Les points importants sont-ils couverts ?
-- **Précision** : Les informations sont-elles exactes ?
-
-TRANSCRIPTION ORIGINALE (extrait) :
-{transcription[:5000]}...
-
-EXTRACTION À ÉVALUER :
-Topics: {topics}
-Points clés: {points[:5]}...
-Résumé: {resume}
-
-Réponds en JSON uniquement :
-{{
-    "pertinence": 85,
-    "completude": 90,
-    "precision": 88,
-    "score_global": 88,
-    "justification": "Bonne extraction qui couvre les points essentiels..."
-}}"""
+        prompt = PROMPTS['judge_extraction'](transcription, extraction_data)
 
         logger.info("⚖️ Évaluation par Judge...")
         start_time = time.time()
@@ -160,10 +129,10 @@ Réponds en JSON uniquement :
         # Tentative avec judge principal
         try:
             response = self.client.chat.completions.create(
-                model=self.judge_model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=1000,
-                temperature=0.1
+                model=self.judge_model
+                ,messages=[{"role": "user", "content": prompt}]
+                ,max_tokens=config.judge_max_tokens
+                ,temperature=config.temperature
             )
 
             duration = time.time() - start_time
@@ -197,8 +166,8 @@ Réponds en JSON uniquement :
                 response = self.client.chat.completions.create(
                     model=self.fallback_judge,
                     messages=[{"role": "user", "content": prompt}],
-                    max_tokens=1000,
-                    temperature=0.1
+                    max_tokens=config.judge_max_tokens,
+                    temperature=config.temperature
                 )
 
                 duration = time.time() - start_time

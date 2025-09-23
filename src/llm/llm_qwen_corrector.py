@@ -1,7 +1,7 @@
 """
 Correcteur LLM Qwen pour transcriptions de réunions avec évaluation intégrée
 Module activé uniquement sur demande (téléchargement transcription propre)
-Refacto sur modèle llm_qwen_enhanced_extractor.py pour cohérence
+RRFACTO : centralisation avec llm_config.py
 """
 import json
 import os
@@ -11,6 +11,14 @@ from typing import Dict, Optional, List
 from openai import OpenAI
 import tiktoken
 from dotenv import load_dotenv
+from pathlib import Path
+import sys
+
+# Path setup pour imports
+sys.path.append(str(Path(__file__).parent.parent.parent))
+
+# Imports SUMMORA
+from src.config.llm_config import MODELS, PROMPTS, config
 
 # Charge les variables depuis .env
 load_dotenv()
@@ -35,19 +43,19 @@ class QwenCorrector:
             api_key: Clé API OpenRouter (ou depuis .env)
         """
         if api_key is None:
-            api_key = os.getenv('OPENROUTER_API_KEY')
+            api_key = config.openrouter_api_key
 
         if not api_key:
             raise ValueError("Clé API OpenRouter requise (OPENROUTER_API_KEY en env ou paramètre)")
 
         self.client = OpenAI(
-            api_key=api_key,
-            base_url="https://openrouter.ai/api/v1"
+            api_key=api_key
+            ,base_url=config.base_url
         )
 
         # Modèles LLM (même pattern que enhanced_extractor)
-        self.corrector_model = "qwen/qwen3-235b-a22b:free"
-        self.judge_model = "tngtech/deepseek-r1t-chimera:free"
+        self.corrector_model = MODELS['correction']
+        self.judge_model = MODELS['judge_primary']
 
         # Gestion des tokens
         self.encoding = tiktoken.get_encoding("cl100k_base")
@@ -116,27 +124,17 @@ class QwenCorrector:
         """
         Corrige un chunk de transcription avec prompt Ground Truth optimisé.
         """
-        prompt = f"""Corrige COMPLÈTEMENT cette transcription. IMPORTANT: traite TOUT le texte fourni.
-
-CONSIGNES SPÉCIALES :
-- Correction pure sans reformulation
-- ATTENTION : Préserve les noms propres, prénoms, villes, marques (ne les modifie pas)
-- Structure en paragraphes lisibles
-- Largeur ~80 caractères par ligne
-
-{chunk}
-
-Retourne le texte corrigé et formaté."""
+        prompt =PROMPTS['correction'](chunk)
 
         logger.info(f"✏️ Correction chunk {chunk_index + 1} - {len(chunk)} chars")
         start_time = time.time()
 
         try:
             response = self.client.chat.completions.create(
-                model=self.corrector_model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=50000,
-                temperature=0.0  # Déterminisme strict Ground Truth
+                model=self.corrector_model
+                ,messages=[{"role": "user", "content": prompt}]
+                ,max_tokens=config.max_tokens
+                ,temperature=0.0  # Déterminisme strict Ground Truth
             )
 
             duration = time.time() - start_time
@@ -145,26 +143,26 @@ Retourne le texte corrigé et formaté."""
             logger.info(f"✅ Correction chunk {chunk_index + 1} terminée en {duration:.2f}s")
 
             return {
-                "success": True,
-                "corrected_text": corrected_text,
-                "metrics": {
-                    "duration": duration,
-                    "input_chars": len(chunk),
-                    "output_chars": len(corrected_text),
-                    "model": self.corrector_model,
-                    "chunk_index": chunk_index
+                "success": True
+                ,"corrected_text": corrected_text
+                ,"metrics": {
+                    "duration": duration
+                    ,"input_chars": len(chunk)
+                    ,"output_chars": len(corrected_text)
+                    ,"model": self.corrector_model
+                    ,"chunk_index": chunk_index
                 }
             }
 
         except Exception as e:
             logger.error(f"❌ Erreur correction chunk {chunk_index + 1}: {str(e)}")
             return {
-                "success": False,
-                "error": str(e),
-                "original_text": chunk,  # Fallback vers texte original
-                "metrics": {
-                    "duration": time.time() - start_time,
-                    "chunk_index": chunk_index
+                "success": False
+                ,"error": str(e)
+                ,"original_text": chunk  # Fallback vers texte original
+                ,"metrics": {
+                    "duration": time.time() - start_time
+                    ,"chunk_index": chunk_index
                 }
             }
 
@@ -205,18 +203,18 @@ Retourne le texte corrigé et formaté."""
             logger.warning(f"⚠️ {len(total_errors)} erreurs lors de la correction")
 
         return {
-            "success": len(total_errors) == 0,
-            "corrected_transcription": corrected_transcription,
-            "original_transcription": transcription,
-            "errors": total_errors if total_errors else None,
-            "metrics": {
-                "total_duration": total_duration,
-                "chunks_processed": len(chunks),
-                "chunks_success": len(chunks) - len(total_errors),
-                "original_chars": len(transcription),
-                "corrected_chars": len(corrected_transcription),
-                "improvement_ratio": len(corrected_transcription) / len(transcription) if len(transcription) > 0 else 1.0,
-                "chunk_details": chunk_metrics
+            "success": len(total_errors) == 0
+            ,"corrected_transcription": corrected_transcription
+            ,"original_transcription": transcription
+            ,"errors": total_errors if total_errors else None
+            ,"metrics": {
+                "total_duration": total_duration
+                ,"chunks_processed": len(chunks)
+                ,"chunks_success": len(chunks) - len(total_errors)
+                ,"original_chars": len(transcription)
+                ,"corrected_chars": len(corrected_transcription)
+                ,"improvement_ratio": len(corrected_transcription) / len(transcription) if len(transcription) > 0 else 1.0
+                ,"chunk_details": chunk_metrics
             }
         }
 
@@ -232,44 +230,17 @@ Retourne le texte corrigé et formaté."""
         Returns:
             Dict: Scores + justification + insights correction
         """
-        prompt = f"""Tu es expert en évaluation de correction de transcriptions multilingues.
-
-Tu dois évaluer la QUALITÉ DE CORRECTION de cette transcription selon critères professionnels.
-
-TRANSCRIPTION ORIGINALE (Whisper Medium):
-{original[:2000]}
-
-TRANSCRIPTION CORRIGÉE (LLM Ground Truth):
-{corrected[:2000]}
-
-Évalue la correction selon ces critères (score 0-100) :
-- **Fidélité** : Préservation du contenu sans reformulation excessive
-- **Grammaire** : Correction orthographique et grammaticale
-- **Ponctuation** : Amélioration structure et lisibilité
-- **Préservation** : Maintien du sens et termes techniques
-
-IMPORTANT: Retourne UNIQUEMENT le JSON, pas d'explication avant.
-
-{{
-    "fidelite_contenu": 85,
-    "correction_grammaire": 90,
-    "amelioration_ponctuation": 88,
-    "preservation_sens": 92,
-    "score_global": 88,
-    "justification": "Excellente correction qui préserve le sens tout en améliorant la lisibilité...",
-    "note_sur_10": 8.8,
-    "qualite_ground_truth": "high"
-}}"""
+        prompt = PROMPTS['judge_correction'](original, corrected)
 
         logger.info("⚖️ Évaluation correction par Judge...")
         start_time = time.time()
 
         try:
             response = self.client.chat.completions.create(
-                model=self.judge_model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=1000,
-                temperature=0.0  # Déterminisme strict
+                model=self.judge_model
+                ,messages=[{"role": "user", "content": prompt}]
+                ,max_tokens=config.max_tokens
+                ,temperature=0.0  # Déterminisme strict
             )
 
             duration = time.time() - start_time
@@ -280,10 +251,10 @@ IMPORTANT: Retourne UNIQUEMENT le JSON, pas d'explication avant.
             if not result.strip():
                 logger.error("❌ Judge a retourné une réponse vide")
                 return {
-                    "success": False,
-                    "error": "empty_response",
-                    "fallback_score": 50.0,
-                    "metrics": {"duration": duration}
+                    "success": False
+                    ,"error": "empty_response"
+                    ,"fallback_score": 50.0
+                    ,"metrics": {"duration": duration}
                 }
 
             try:
@@ -327,32 +298,32 @@ IMPORTANT: Retourne UNIQUEMENT le JSON, pas d'explication avant.
                 logger.info(f"✅ Judge correction terminé en {duration:.2f}s - Score global: {score_global}")
 
                 return {
-                    "success": True,
-                    "scores": judge_scores,
-                    "score_global": score_global,
-                    "note_sur_10": note_sur_10,
-                    "qualite_ground_truth": judge_scores.get('qualite_ground_truth', 'medium'),
-                    "metrics": {"duration": duration, "model": self.judge_model}
+                    "success": True
+                    ,"scores": judge_scores
+                    ,"score_global": score_global
+                    ,"note_sur_10": note_sur_10
+                    ,"qualite_ground_truth": judge_scores.get('qualite_ground_truth', 'medium')
+                    ,"metrics": {"duration": duration, "model": self.judge_model}
                 }
 
             except json.JSONDecodeError as e:
                 logger.error(f"❌ Judge JSON parsing failed: {e}")
                 logger.error(f"📋 Raw response: {result}")
                 return {
-                    "success": False,
-                    "error": "json_parsing_failed",
-                    "raw_content": result,
-                    "fallback_score": 50.0,
-                    "metrics": {"duration": duration}
+                    "success": False
+                    ,"error": "json_parsing_failed"
+                    ,"raw_content": result
+                    ,"fallback_score": 50.0
+                    ,"metrics": {"duration": duration}
                 }
 
         except Exception as e:
             logger.error(f"❌ Erreur judge correction: {str(e)}")
             return {
-                "success": False,
-                "error": str(e),
-                "fallback_score": 0.0,
-                "metrics": {"duration": time.time() - start_time}
+                "success": False
+                ,"error": str(e)
+                ,"fallback_score": 0.0
+                ,"metrics": {"duration": time.time() - start_time}
             }
 
     def correct_and_evaluate(self, transcription: str) -> Dict:
@@ -374,11 +345,11 @@ IMPORTANT: Retourne UNIQUEMENT le JSON, pas d'explication avant.
 
         if not correction_result["success"]:
             return {
-                "method": "qwen_corrector_with_judge",
-                "success": False,
-                "error": "correction_failed",
-                "correction_details": correction_result,
-                "metrics": {"duration": time.time() - start_time}
+                "method": "qwen_corrector_with_judge"
+                ,"success": False
+                ,"error": "correction_failed"
+                ,"correction_details": correction_result
+                ,"metrics": {"duration": time.time() - start_time}
             }
 
         original_text = correction_result["original_transcription"]
@@ -390,23 +361,23 @@ IMPORTANT: Retourne UNIQUEMENT le JSON, pas d'explication avant.
         total_duration = time.time() - start_time
 
         return {
-            "method": "qwen_corrector_with_judge",
-            "success": True,
-            "correction": {
-                "original_text": original_text,
-                "corrected_text": corrected_text,
-                "improvement_ratio": correction_result["metrics"]["improvement_ratio"],
-                "chunks_processed": correction_result["metrics"]["chunks_processed"]
+            "method": "qwen_corrector_with_judge"
+            ,"success": True
+            ,"correction": {
+                "original_text": original_text
+                ,"corrected_text": corrected_text
+                ,"improvement_ratio": correction_result["metrics"]["improvement_ratio"]
+                ,"chunks_processed": correction_result["metrics"]["chunks_processed"]
             },
-            "quality_evaluation": judge_result,
-            "ready_for_download": correction_result["success"] and judge_result.get("success", False),
-            "ground_truth_quality": judge_result.get("qualite_ground_truth", "medium"),
-            "metrics": {
-                "total_duration": total_duration,
-                "correction_duration": correction_result["metrics"]["total_duration"],
-                "judge_duration": judge_result.get("metrics", {}).get("duration", 0),
-                "corrector_model": self.corrector_model,
-                "judge_model": self.judge_model
+            "quality_evaluation": judge_result
+            ,"ready_for_download": correction_result["success"] and judge_result.get("success", False)
+            ,"ground_truth_quality": judge_result.get("qualite_ground_truth", "medium")
+            ,"metrics": {
+                "total_duration": total_duration
+                ,"correction_duration": correction_result["metrics"]["total_duration"]
+                ,"judge_duration": judge_result.get("metrics", {}).get("duration", 0)
+                ,"corrector_model": self.corrector_model
+                ,"judge_model": self.judge_model
             }
         }
 
@@ -430,29 +401,29 @@ def correct_transcription_for_download(transcription: str) -> Dict:
     # Format rétrocompatible
     if result["success"]:
         return {
-            "method": "qwen_llm_corrector_with_judge",
-            "success": True,
-            "corrected_text": result["correction"]["corrected_text"],
-            "original_text": result["correction"]["original_text"],
-            "quality_scores": result["quality_evaluation"].get("scores", {}),
-            "ground_truth_quality": result["ground_truth_quality"],
-            "metrics": result["metrics"],
-            "ready_for_download": result["ready_for_download"]
+            "method": "qwen_llm_corrector_with_judge"
+            ,"success": True
+            ,"corrected_text": result["correction"]["corrected_text"]
+            ,"original_text": result["correction"]["original_text"]
+            ,"quality_scores": result["quality_evaluation"].get("scores", {})
+            ,"ground_truth_quality": result["ground_truth_quality"]
+            ,"metrics": result["metrics"]
+            ,"ready_for_download": result["ready_for_download"]
         }
     else:
         return {
-            "method": "qwen_llm_corrector_with_judge",
-            "success": False,
-            "error": result["error"],
-            "metrics": result["metrics"],
-            "ready_for_download": False
+            "method": "qwen_llm_corrector_with_judge"
+            ,"success": False
+            ,"error": result["error"]
+            ,"metrics": result["metrics"]
+            ,"ready_for_download": False
         }
 
 # Fonction pipeline complet (nouvelle API recommandée)
 def correct_and_evaluate_transcription(transcription: str) -> Dict:
     """
     Pipeline complet correction+évaluation pour usage direct.
-    Nouvelle API recommandée post-refacto.
+    Nouvelle API post-refacto.
     """
     corrector = create_qwen_corrector()
     return corrector.correct_and_evaluate(transcription)

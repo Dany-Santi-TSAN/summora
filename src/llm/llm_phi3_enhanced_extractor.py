@@ -15,6 +15,7 @@ sys.path.append(str(Path(__file__).parent.parent.parent))
 # Imports Summora
 from src.meeting.extractor import MeetingContentExtractor, MeetingExtractionConfig
 from src.core.business_vocabulary import BUSINESS_KEYWORDS
+from src.config.llm_config import MODELS, PROMPTS, config
 
 # Imports ML (avec gestion d'erreur)
 try:
@@ -39,7 +40,7 @@ class Phi3EnhancedExtractor:
 
         self.model = None
         self.tokenizer = None
-        self.model_name = "microsoft/Phi-3-mini-128k-instruct"  # Version 128k !
+        self.model_name = MODELS['phi3']
         self.max_context_tokens = 16000  # Limite sécurisée (vs 128k théorique)
 
         # Extracteur YAKE pour preprocessing
@@ -61,28 +62,28 @@ class Phi3EnhancedExtractor:
 
             # Configuration quantification
             quantization_config = BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_compute_dtype=torch.float16,
-                bnb_4bit_use_double_quant=True,
-                bnb_4bit_quant_type="nf4"
+                load_in_4bit=True
+                ,bnb_4bit_compute_dtype=torch.float16
+                ,bnb_4bit_use_double_quant=True
+                ,bnb_4bit_quant_type="nf4"
             )
 
             # Chargement modèle
             self.model = AutoModelForCausalLM.from_pretrained(
-                self.model_name,
-                quantization_config=quantization_config,
-                device_map="cuda" if torch.cuda.is_available() else "cpu",
-                trust_remote_code=True,
-                torch_dtype=torch.float16,
-                token=False,
-                attn_implementation='eager'
+                self.model_name
+                ,quantization_config=quantization_config
+                ,device_map="cuda" if torch.cuda.is_available() else "cpu"
+                ,trust_remote_code=True
+                ,torch_dtype=torch.float16
+                ,token=False
+                ,attn_implementation='eager'
             )
 
             # Tokenizer
             self.tokenizer = AutoTokenizer.from_pretrained(
-                self.model_name,
-                trust_remote_code=True,
-                token=False
+                self.model_name
+                ,trust_remote_code=True
+                ,token=False
             )
 
             if torch.cuda.is_available():
@@ -101,10 +102,10 @@ class Phi3EnhancedExtractor:
             yake_results = self.yake_extractor.extract_meeting_content(transcription)
 
             context = {
-                "business_topics": [],
-                "action_indicators": [],
-                "decision_indicators": [],
-                "business_density": 0
+                "business_topics": []
+                ,"action_indicators": []
+                ,"decision_indicators": []
+                ,"business_density": 0
             }
 
             # Topics business détectés par YAKE
@@ -147,8 +148,8 @@ class Phi3EnhancedExtractor:
         """
         # Vocabulaire business réduit
         business_categories = {
-            'actions': BUSINESS_KEYWORDS.get('actions', [])[:8],
-            'decisions': BUSINESS_KEYWORDS.get('decisions', [])[:8],
+            'actions': BUSINESS_KEYWORDS.get('actions', [])[:8]
+            ,'decisions': BUSINESS_KEYWORDS.get('decisions', [])[:8]
         }
 
         # Transcription tronquée si trop longue
@@ -198,10 +199,10 @@ Réponds UNIQUEMENT en JSON valide:
 
             # 3. Tokenisation avec gestion des limites
             inputs = self.tokenizer(
-                prompt,
-                return_tensors="pt",
-                truncation=True,
-                max_length=self.max_context_tokens
+                prompt
+                ,return_tensors="pt"
+                ,truncation=True
+                ,max_length=self.max_context_tokens
             )
 
             if torch.cuda.is_available():
@@ -210,12 +211,12 @@ Réponds UNIQUEMENT en JSON valide:
             # 4. Génération
             with torch.no_grad():
                 outputs = self.model.generate(
-                    **inputs,
-                    max_new_tokens=200,  # Limité pour 2-3 topics + 5 points
-                    temperature=0.1,    # Température basse = moins d'hallucinations
-                    do_sample=False,    # Déterministe
-                    pad_token_id=self.tokenizer.eos_token_id,
-                    use_cache=False     # Économie mémoire
+                    **inputs
+                    ,max_new_tokens=200 # Limité pour 2-3 topics + 5 points
+                    ,temperature=0.1
+                    ,do_sample=False    # Déterministe
+                    ,pad_token_id=self.tokenizer.eos_token_id
+                    ,use_cache=False    # Économie mémoire
                 )
 
             # 5. Décodage
@@ -247,15 +248,15 @@ Réponds UNIQUEMENT en JSON valide:
                 parsed_result = json.loads(response)
 
                 return {
-                    "success": True,
-                    "data": parsed_result,
-                    "yake_context": yake_context,
-                    "enhancement_used": True,
-                    "metrics": {
-                        "duration": duration,
-                        "model": self.model_name,
-                        "input_chars": len(transcription),
-                        "context_tokens": inputs['input_ids'].shape[1]
+                    "success": True
+                    ,"data": parsed_result
+                    ,"yake_context": yake_context
+                    ,"enhancement_used": True
+                    ,"metrics": {
+                        "duration": duration
+                        ,"model": self.model_name
+                        ,"input_chars": len(transcription)
+                        ,"context_tokens": inputs['input_ids'].shape[1]
                     }
                 }
 
@@ -263,18 +264,18 @@ Réponds UNIQUEMENT en JSON valide:
                 logger.error(f"❌ Erreur JSON Phi3: {e}")
                 logger.error(f"📋 Réponse brute: {response}")
                 return {
-                    "success": False,
-                    "error": "json_parsing_failed",
-                    "raw_response": response,
-                    "yake_context": yake_context
+                    "success": False
+                    ,"error": "json_parsing_failed"
+                    ,"raw_response": response
+                    ,"yake_context": yake_context
                 }
 
         except Exception as e:
             logger.error(f"❌ Erreur Phi3 Enhanced: {str(e)}")
             return {
-                "success": False,
-                "error": str(e),
-                "metrics": {"duration": time.time() - start_time}
+                "success": False
+                ,"error": str(e)
+                ,"metrics": {"duration": time.time() - start_time}
             }
 
 # Fonction utilitaire
@@ -291,34 +292,34 @@ def extract_with_phi3_enhanced(transcription: str) -> Dict:
 
         if not extraction_result["success"]:
             return {
-                "method": "phi3_enhanced_by_yake",
-                "success": False,
-                "error": extraction_result["error"],
-                "yake_context": extraction_result.get("yake_context", {})
+                "method": "phi3_enhanced_by_yake"
+                ,"success": False
+                ,"error": extraction_result["error"]
+                ,"yake_context": extraction_result.get("yake_context", {})
             }
 
         # Format compatible pipeline
         return {
-            "method": "phi3_enhanced_by_yake",
-            "success": True,
-            "extraction": extraction_result["data"],
-            "yake_context": extraction_result["yake_context"],
-            "quality_scores": {"score_global": 75},  # Score conservateur pour SLM
-            "metrics": extraction_result["metrics"],
-            "enhancement_used": True
+            "method": "phi3_enhanced_by_yake"
+            ,"success": True
+            ,"extraction": extraction_result["data"]
+            ,"yake_context": extraction_result["yake_context"]
+            ,"quality_scores": {"score_global": 75} # Score conservateur pour SLM
+            ,"metrics": extraction_result["metrics"]
+            ,"enhancement_used": True
         }
 
     except ImportError:
         return {
-            "method": "phi3_enhanced_by_yake",
-            "success": False,
-            "error": "transformers_not_available"
+            "method": "phi3_enhanced_by_yake"
+            ,"success": False
+            ,"error": "transformers_not_available"
         }
     except Exception as e:
         return {
-            "method": "phi3_enhanced_by_yake",
-            "success": False,
-            "error": str(e)
+            "method": "phi3_enhanced_by_yake"
+            ,"success": False
+            ,"error": str(e)
         }
 
 # Test

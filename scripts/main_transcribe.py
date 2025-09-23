@@ -12,6 +12,8 @@ from pathlib import Path
 from datetime import datetime
 import json
 import sys
+import textwrap
+
 
 # Setup path pour imports Summora
 sys.path.append(str(Path(__file__).parent.parent))
@@ -35,6 +37,10 @@ def setup_logging(verbose: bool = False, quiet: bool = False):
         datefmt='%H:%M:%S'
     )
 
+def format_text_for_display(text: str, width: int = 80) -> str:
+    """Formate le texte avec retour à la ligne à 80 caractères."""
+    return textwrap.fill(text, width=width, break_long_words=False, break_on_hyphens=False)
+
 def format_transcription_time(seconds: float) -> str:
     """Formate le temps de transcription de manière lisible."""
     if seconds >= 60:
@@ -52,7 +58,7 @@ def get_optimal_model(audio_path: Path, requested_model: str) -> str:
     file_size_mb = audio_path.stat().st_size / (1024 * 1024)
 
     # Si un modèle spécifique est demandé, on le respecte
-    if requested_model in ["small", "medium", "large"]:
+    if requested_model in ["base","small", "medium", "large"]:
         return requested_model
 
     # Sélection automatique selon la taille
@@ -74,7 +80,7 @@ def get_optimal_model(audio_path: Path, requested_model: str) -> str:
 def transcribe_with_fallback(audio_path: Path, preferred_model: str, language: str, temperature: float) -> dict:
     """
     Transcription avec fallback automatique en cas d'erreur.
-    Ordre: Medium → Small → Erreur
+    Ordre: Medium → Small → Base -> Erreur
     """
     logger = logging.getLogger(__name__)
 
@@ -82,11 +88,15 @@ def transcribe_with_fallback(audio_path: Path, preferred_model: str, language: s
 
     # Construction de la liste des modèles à tester
     if preferred_model == "large":
-        models_to_try = ["large", "medium", "small"]
+        models_to_try = ["large", "medium", "small", "base"]
     elif preferred_model == "medium":
-        models_to_try = ["medium", "small"]
-    else:  # small ou auto
-        models_to_try = ["small"]
+        models_to_try = ["medium", "small","base"]
+    elif preferred_model == "small":
+        models_to_try = ["small","base"]
+    elif preferred_model == "base":
+        models_to_try = ["base"]
+    else: # Fallback
+        models_to_try = ["base"]
 
     last_error = None
 
@@ -117,22 +127,53 @@ def transcribe_with_fallback(audio_path: Path, preferred_model: str, language: s
 
         except Exception as e:
             last_error = {"error": "exception", "message": str(e)}
+            logger.info(f"message d'erreur: '{last_error[500:]}'")
             logger.error(f"❌ Exception modèle '{model}': {str(e)}")
 
     # Tous les modèles ont échoué
     logger.error("❌ Tous les modèles de transcription ont échoué")
     return last_error or {"error": "all_models_failed", "message": "Aucun modèle n'a pu traiter ce fichier"}
 
-def save_transcription(transcription_result: dict, audio_path: Path, model: str,
-                      processing_time: float, language: str, output_file: str = None) -> str:
-    """
-    Sauvegarde la transcription dans un fichier texte structuré.
-    """
+#############################
+# Sauvegarde
+#############################
+
+def generate_file_path(audio_path: Path, model: str, suffix: str, output_file: str = None) -> Path:
+    """Génère un chemin de fichier avec timestamp et suffixe."""
     if output_file:
-        save_path = Path(output_file)
-    else:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        save_path = Path('output/transcriptions') / (f"transcription_{audio_path.stem}_{model}_{timestamp}.txt")
+        return Path(output_file)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"transcription_{audio_path.stem}_{model}_{timestamp}_{suffix}"
+    return Path('output/transcriptions') / filename
+
+def save_raw_transcription(transcription_result: dict, audio_path: Path, model: str, output_file: str = None) -> str:
+
+    """Sauvegarde la transcription brut pour chainage avec les autres modules"""
+
+    save_path = generate_file_path(audio_path
+                                   ,model
+                                   ,"raw.txt"
+                                   ,output_file)
+    # Créer le répertoire si nécessaire
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(save_path, 'w', encoding='utf-8') as f:
+        # Formatage du texte à 80 caractères
+        formatted_text = format_text_for_display(transcription_result.get('text', ''))
+        f.write(formatted_text)
+
+    return str(save_path)
+
+def save_transcription_report(transcription_result: dict, audio_path: Path, model: str,
+                      processing_time: float, language: str, output_file: str = None) -> str:
+
+    """Sauvegarde la transcription dans un fichier texte structuré."""
+
+    save_path = generate_file_path(audio_path
+                                   ,model
+                                   ,"reporting.txt"
+                                   ,output_file)
 
     # Créer le répertoire si nécessaire
     save_path.parent.mkdir(parents=True, exist_ok=True)
@@ -218,7 +259,10 @@ def save_transcription(transcription_result: dict, audio_path: Path, model: str,
         # Transcription complète
         f.write("📝 TRANSCRIPTION COMPLÈTE\n")
         f.write("=" * 70 + "\n\n")
-        f.write(transcription_result.get('text', ''))
+
+        # Formatage du texte à 80 caractères
+        formatted_text = format_text_for_display(transcription_result.get('text', ''))
+        f.write(formatted_text)
 
         # Footer
         f.write(f"\n\n{'=' * 70}\n")
@@ -228,9 +272,16 @@ def save_transcription(transcription_result: dict, audio_path: Path, model: str,
     return str(save_path)
 
 def save_metadata_json(transcription_result: dict, audio_path: Path, model: str,
-                      processing_time: float, language: str, save_path: str):
+                      processing_time: float, language: str, output_file: str = None) -> str:
+
     """Sauvegarde les métadonnées en JSON pour usage programmatique."""
-    metadata_path = Path(save_path).with_suffix('.json')
+    save_path = generate_file_path(audio_path
+                                   ,model
+                                   ,".json"
+                                   ,output_file)
+
+    # Créer le répertoire si nécessaire
+    save_path.parent.mkdir(parents=True, exist_ok = True)
 
     metadata = {
         "source": {
@@ -263,10 +314,10 @@ def save_metadata_json(transcription_result: dict, audio_path: Path, model: str,
         "summora_version": "3.0"
     }
 
-    with open(metadata_path, 'w', encoding='utf-8') as f:
+    with open(save_path, 'w', encoding='utf-8') as f:
         json.dump(metadata, f, indent=2, ensure_ascii=False)
 
-    return str(metadata_path)
+    return str(save_path)
 
 def print_summary(transcription_result: dict, audio_path: Path, model: str,
                  processing_time: float, show_preview: bool = True, show_full: bool = False):
@@ -355,7 +406,7 @@ def main():
     parser.add_argument(
         "--model", "-m"
         ,type=str
-        ,choices=["small", "medium", "large", "auto"]
+        ,choices=["base","small", "medium", "large", "auto"]
         ,default="auto"
         ,help="Modèle Whisper (défaut: auto=medium/small selon taille)"
     )
@@ -398,12 +449,6 @@ def main():
         "--output", "-o"
         ,type=str
         ,help="Nom du fichier de sortie"
-    )
-
-    parser.add_argument(
-        "--json-metadata"
-        ,action="store_true"
-        ,help="Sauvegarde aussi les métadonnées en JSON"
     )
 
     # Options système
@@ -484,20 +529,30 @@ def main():
         # Sauvegarde si demandée
         saved_files = []
         if not args.no_save:
-            # Sauvegarde texte
-            saved_path = save_transcription(
-                transcription_result, audio_path, optimal_model,
-                processing_time, args.language, args.output
-            )
-            saved_files.append(saved_path)
+            # Texte brut pour chainage
+            raw_path = save_raw_transcription(transcription_result
+                                              ,audio_path
+                                              ,optimal_model
+                                              ,args.output)
+            saved_files.append(raw_path)
 
-            # Sauvegarde JSON si demandée
-            if args.json_metadata:
-                json_path = save_metadata_json(
-                    transcription_result, audio_path, optimal_model,
-                    processing_time, args.language, saved_path
-                )
-                saved_files.append(json_path)
+            # Sauvegarde transcription report
+            report_path = save_transcription_report(transcription_result
+                                                    ,audio_path
+                                                    ,optimal_model
+                                                    ,processing_time
+                                                    ,args.language
+                                                    ,args.output)
+            saved_files.append(report_path)
+
+            # Sauvegarde en JSON
+            json_path = save_metadata_json(transcription_result
+                                           ,audio_path
+                                           ,optimal_model
+                                           ,processing_time
+                                           ,args.language
+                                           ,args.output)
+            saved_files.append(json_path)
 
         # Affichage des résultats
         if args.quiet:
