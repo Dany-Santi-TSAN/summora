@@ -323,7 +323,7 @@ class ExtractionSaver:
             return ""
 
 
-# === TranscriptionQualityAnalyzer (gardé mais simplifié) ===
+# === TranscriptionQualityAnalyzer ===
 class TranscriptionQualityAnalyzer:
     """Analyseur de qualité transcription pour métriques extraction."""
 

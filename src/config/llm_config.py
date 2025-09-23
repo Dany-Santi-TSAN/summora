@@ -27,24 +27,21 @@ class LLMConfig:
 # Modèles par tâche
 MODELS = {
     # Extraction
-    #'extraction_enhanced': "deepseek/deepseek-r1-0528-qwen3-8b:free"
     'extraction_enhanced' : "qwen/qwen3-next-80b-a3b-instruct"
     ,'extraction_fallback': "mistralai/mistral-small-3.2-24b-instruct:free"
 
     # Judges
-    ,'judge_primary': "tngtech/deepseek-r1t-chimera:free"
-    ,'judge_fallback': "nousresearch/deephermes-3-llama-3-8b-preview:free"
+    ,'judge_primary': "mistralai/ministral-8b"
+    ,'judge_fallback': "deepseek/deepseek-r1-0528-qwen3-8b:free"
 
     # Recommandations
     ,'recommendation': "qwen/qwen3-next-80b-a3b-instruct"
-    #,'recommendation': "mistralai/mistral-small-3.2-24b-instruct:free"
+    ,'recommendation_fallback': "mistralai/mistral-small-3.2-24b-instruct:free"
 
     # Correction
     ,'correction': "qwen/qwen3-next-80b-a3b-instruct"
-    #,'correction': "mistralai/mistral-small-3.2-24b-instruct:free"
+    ,'correction_fallback': "mistralai/mistral-small-3.2-24b-instruct:free"
 
-    # Phi3 (slm fallback)
-    ,'phi3': "microsoft/Phi-3-mini-128k-instruct"
 }
 
 # Prompts centralisés

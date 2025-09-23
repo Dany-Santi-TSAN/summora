@@ -99,7 +99,7 @@ class TranscriptionCorrectionPipeline:
             evaluation_report: EvaluationReport = self.evaluator.evaluate_complete(
                 reference=original,  # Brute = référence
                 hypothesis=corrected,  # Corrigée = hypothèse
-                include_experimental=False  # Skip PER/SemDist pour économiser RAM
+                include_experimental=True  # Skip PER/SemDist pour économiser RAM
             )
 
             # Conversion EvaluationReport → Dict pour sérialisation JSON
