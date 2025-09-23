@@ -32,8 +32,18 @@ bash deploy_summora_aws.sh --post-reboot
 
 ### Transfer code + test
 scp -i keys/summora-keypair-190625.pem -r * ubuntu@[NOUVELLE_IP]:~/summora/
+
 ### environnement
 source summora-env/bin/activate
 cd summora
+
+### Créer le dot env
+touch .env
+echo "OP_API=vjkj..." >> .env
+echo "HF_API=flkdjfkl..." >> .env
+cat .env
+
+# Récupérer tous les fichiers du dossier ~/summora de l'instance
+scp -i keys/summora-keypair-190625.pem -r ubuntu@[NOUVELLE_IP]:~/summora/* ./output/
 
 ## /!\ Zsh interprète le wildcard avant SCP

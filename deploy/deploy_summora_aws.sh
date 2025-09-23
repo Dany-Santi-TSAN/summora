@@ -123,11 +123,12 @@ echo "Installation dépendances nécessaires Summora..."
 echo "Installation Whisper..."
 pip install openai-whisper
 
-# Dépendances ML/NLP
-echo "Installation dépendances ML/NLP..."
+# Dépendances ML/NLP/Audio/embedding
+echo "Installation dépendances ML/NLP/Audio/RAG..."
 pip install scikit-learn pandas numpy
 pip install nltk yake textstat
 pip install transformers datasets
+pip install librosa soundfile sentence-transformers faiss-cpu requests
 
 # Dépendances déploiement
 echo "Installation dépendances déploiement..."
@@ -274,7 +275,7 @@ def test_summora(audio_file):
     start_time = time.time()
 
     try:
-        result = subprocess.run(["python", "main.py", audio_file],
+        result = subprocess.run(["python", "scripts/main.py", audio_file, "--model", "medium"],
                               capture_output=True, text=True, timeout=1200) # timeout 20 min
 
         end_time = time.time()
@@ -299,9 +300,9 @@ def main():
     print("Test de performance Summora AWS")
     print("===============================")
 
-    # Vérification main.py
-    if not os.path.exists("main.py"):
-        print("main.py non trouvé. Exécutez depuis le répertoire Summora.")
+    # Vérification scripts/main.py
+    if not os.path.exists("scripts/main.py"):
+        print("scripts/main.py non trouvé. Exécutez depuis le répertoire Summora.")
         sys.exit(1)
 
     # Liste des fichiers audio à tester
@@ -342,9 +343,6 @@ if __name__ == "__main__":
     main()
 EOF
 
-chmod +x ~/summora/test_performance.py
-echo "Script de test généré: ~/summora/test_performance.py"
-
 ############################################
 # 15. Instructions finales
 ############################################
@@ -357,18 +355,19 @@ echo "1. Transférer votre code Summora:"
 echo "   scp -i key.pem -r ./summora-project/ ubuntu@IP:~/summora/"
 echo ""
 echo "2. Transférer vos fichiers audio de test:"
-echo "   scp -i key.pem test-reunion.mp3.mp3 podcast-1h.mp3 ubuntu@IP:~/summora/"
+echo "   scp -i key.pem test-reunion.mp3 podcast-1h.mp3 ubuntu@IP:~/summora/"
 echo ""
 echo "3. Se connecter et activer l'environnement:"
 echo "   ssh -i key.pem ubuntu@IP"
 echo "   summora"
 echo ""
-echo "4. Lancer le benchmark:"
-echo "   python scripts/main.py"
+echo "4. Lancer le script:"
+echo "   python scripts/main.py data/test-reunion.mp3 --model medium --full"
+echo "   python scripts/main.py data/podcast-1h.mp3 --model medium --full"
 echo ""
 echo "Commandes utiles:"
 echo "  summora               # Activer env + aller dans répertoire"
 echo "  gpu-status            # Monitor GPU temps réel"
-echo "  python main.py --help # Aide Summora"
+echo "  python scripts/main.py --help # Aide Summora"
 echo ""
-echo "L'environnement est prêt pour vos tests de performance
+echo "L'environnement est prêt pour les tests de performance"
