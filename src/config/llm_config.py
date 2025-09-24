@@ -120,47 +120,48 @@ Réponds en JSON uniquement :
 }}""",
 
     # Recommandations
-'recommendation': lambda transcription, extraction_data=None, enhanced_context="", specialized_context="", meeting_type="Général": f"""Consultant expert optimisation meetings. {enhanced_context}
+'recommendation': lambda transcription, extraction_data=None, enhanced_context="", specialized_context="", meeting_type="Général": f"""Tu es un consultant expert en optimisation de meetings. {enhanced_context}
 
-**INSTRUCTIONS STRICTES :**
-- Réponds **UNIQUEMENT** avec un JSON valide, sans balises Markdown, sans commentaires, sans introduction.
-- Ne génère **AUCUN** texte en dehors du JSON (pas de balises ```json, pas de <think>, pas de "Voici le JSON").
-- **Commence ta réponse immédiatement par le JSON**, sans espace ni saut de ligne avant.
+**MISSION :** Analyser cette transcription de meeting type "{meeting_type}" et proposer des améliorations concrètes.
 
-**CONTEXTE SPÉCIALISÉ:** {specialized_context}
+**CONTEXTE SPÉCIALISÉ :** {specialized_context}
 
-**FEW-SHOTS EXEMPLES (ne pas copier) :**
-Réunion dispersée → Structure: "Agenda 24h avant + Timekeeper", Animation: "Parking lot idées off-topic"
-Meeting technique → Communication: "Schémas visuels + Glossaire", Participation: "Validation compréhension"
-Réunion conflictuelle → Animation: "Règles débat + Médiateur neutre", Efficacité: "Points convergence d'abord"
+**ANALYSE À EFFECTUER :**
+- Identifier les problèmes de structure, animation, participation, communication, efficacité
+- Proposer des solutions actionnables avec outils/techniques précis
+- Adapter au contexte métier détecté
 
-**CATÉGORIES:** Structure, Animation, Participation, Efficacité, Communication
-
-**TRANSCRIPTION:**
+**TRANSCRIPTION À ANALYSER :**
 {transcription[:1500]}
 
-**FORMAT DE RÉPONSE OBLIGATOIRE :**
+**CATÉGORIES DE RECOMMANDATIONS :**
+Structure | Animation | Participation | Efficacité | Communication
+
+**FORMAT DE RÉPONSE OBLIGATOIRE (JSON uniquement, sans balises) :**
 {{
     "recommandations_principales": [
         {{
-            "categorie": "[Structure|Animation|Participation|Efficacité|Communication]",
-            "titre": "[action concrète en 10 mots max]",
-            "description": "[détails précis + exemples/outils concrets]",
-            "impact": "[very_high|high|medium|low]",
-            "facilite_implementation": "[easy|medium|hard]"
+            "categorie": "Structure",
+            "titre": "Titre doit contenir au moins un élément du domaine ou du problème identifié.",
+            "description": "Explication détaillée avec outils/techniques spécifiques à appliquer",
+            "impact": "very_high",
+            "facilite_implementation": "easy"
         }}
     ],
-    "resume_conseil": "[2-3 priorités adaptées au contexte {meeting_type}]",
-    "score_amelioration_potentiel": [0-100]
+    "resume_conseil": "2-3 priorités clés adaptées au contexte {meeting_type}",
+    "score_amelioration_potentiel": 85
 }}
 
-**RÈGLES ABSOLUES :**
-- Génère 3-7 recommandations concrètes et actionnables
-- Adapte au contexte détecté, ne copie pas les exemples
-- Score basé sur: clarté objectifs + structure + participation + décisions
-- Commence **immédiatement** par le JSON
+**RÈGLES CRITIQUES :**
+1. Réponds IMMÉDIATEMENT par le JSON, sans texte avant/après
+2. Génère 4-6 recommandations originales basées sur l'ANALYSE RÉELLE de la transcription
+3. Chaque recommandation doit être spécifique au contenu analysé
+4. Ne copie aucun exemple générique
+5. Impact : very_high/high/medium/low
+6. Facilité : easy/medium/hard
+7. Score basé sur le potentiel d'amélioration détecté
 
-- **INTERDIT ABSOLU** : Ne génère JAMAIS de balises ```json ou ``` ou <JSON> ou toute autre balise."""
+COMMENCE TA RÉPONSE MAINTENANT :"""
 ,
 
     # Judge recommandations

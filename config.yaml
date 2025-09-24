@@ -6,7 +6,7 @@ language: "fr"
 enable_spot_check: false
 enable_recommendation: false
 enable_correction: false
-enable_visual: false
+enable_audio_data: false
 
 # Options avancées
 temperature: 0.0

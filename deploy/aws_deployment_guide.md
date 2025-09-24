@@ -5,6 +5,7 @@ Anlayse intelligente de réunion
 ## AWS Console
 - Instance: g4dn.xlarge
 - AMI: Ubuntu 22.04 LTS
+- EBS : 50go gp2
 - Key: summora-keypair-190625
 - Security group: summora-security-group
 - id compte aws : 788922688762
@@ -33,17 +34,22 @@ bash deploy_summora_aws.sh --post-reboot
 ### Transfer code + test
 scp -i keys/summora-keypair-190625.pem -r * ubuntu@[NOUVELLE_IP]:~/summora/
 
-### environnement
+### Environnement
 source summora-env/bin/activate
 cd summora
 
+### Vérification installation des dépendances
+pip install -r requirements.txt
+
 ### Créer le dot env
 touch .env
-echo "OP_API=vjkj..." >> .env
-echo "HF_API=flkdjfkl..." >> .env
+echo "OPENROUTER_API_KEY=vjkj..." >> .env
+echo "HF_TOKEN=flkdjfkl..." >> .env
 cat .env
 
 # Récupérer tous les fichiers du dossier ~/summora de l'instance
 scp -i keys/summora-keypair-190625.pem -r ubuntu@[NOUVELLE_IP]:~/summora/* ./output/
+
+### Penser à résilier l'instance
 
 ## /!\ Zsh interprète le wildcard avant SCP
