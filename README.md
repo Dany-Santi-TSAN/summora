@@ -9,7 +9,7 @@
 
 **Objectif** : Développer mes compétences en LLM Engineering et NLP appliqué à l'analyse de réunions, en abordant le projet comme un vrai produit avec une architecture scalable.
 
-**Contexte** : Solution pour automatiser la synthèse de réunions (transcription, résumé, recommandations) en réponse au problème concret de managers perdant ~2h/semaine en rédaction de comptes rendus.
+**Contexte** : Solution pour automatiser la synthèse de réunions (transcription, ground_truth automatisé, résumé, recommandations) en réponse au problème concret de managers perdant ~2h/semaine en rédaction de comptes rendus.
 
 ⚠️ **Note importante** : Projet développé avec des données publiques uniquement. Pas de déploiement en production pour des raisons de conformité RGPD (protection des données de réunions d'entreprise).
 
@@ -20,6 +20,8 @@
 | ------------------------------------ | ---------- | ------------------------------- | ---------------------------------------------------------- |
 | 🎙️ Audio → Whisper + Audio Analysis | YAKE + LLM | [Premium] → [Gratuit] → [Local] | Transcription + Détection NLP + Qualité / Énergie / Rythme |
 
+
+Note : la cascade garantit qu’une réponse est toujours fournie, même si un LLM tombe.
 
 ## 🔧 Personnalisation métier
 
@@ -50,8 +52,6 @@ venv\Scripts\activate      # Windows
 pip install -r requirements.txt
 
 ### Variables d'environnement (API keys)
-
-Créer un fichier .env :
 
 touch .env
 
@@ -85,7 +85,7 @@ streamlit run app/ui_streamlit.py
 
 ## Déploiement EC2 (AWS)
 
-1) Créer un dossier keys/ à la racine et y placer votre key pair AWS.
+1) Créer un dossier **keys/** à la racine et y placer votre **key pair AWS.**
 
 2) Lancer une instance (ex. g4dn.xlarge)
 
@@ -112,23 +112,14 @@ output/
 
 ### Exemple d’extraction :
 
-{
-  "topics_principaux": [
-    "budget marketing 2025",
-    "lancement produit Q2",
-    "recrutement équipe"
-  ],
-  "points_a_retenir": [
-    "Décision: augmenter budget marketing de 20%",
-    "Action Jean: plan détaillé avant vendredi",
-    "Validation KPIs par Paul"
-  ],
-  "insights_business": {
-    "actions_cles": ["Plan marketing détaillé", "Validation KPIs"],
-    "decisions_prises": ["Budget +20%", "Lancement Q2 confirmé"],
-    "next_steps": ["Réunion suivi dans 2 semaines"]
-  }
-}
+| Catégorie             | Détails                                                                                                                |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| **Topics principaux** | budget marketing 2025<br>lancement produit Q2<br>recrutement équipe                                                    |
+| **Points à retenir**  | Décision : augmenter budget marketing de 20%<br>Action Jean : plan détaillé avant vendredi<br>Validation KPIs par Paul |
+| **Actions clés**      | Plan marketing détaillé<br>Validation KPIs                                                                             |
+| **Décisions prises**  | Budget +20%<br>Lancement Q2 confirmé                                                                                   |
+| **Next steps**        | Réunion suivi dans 2 semaines                                                                                          |
+
 
 
 ## 🤝 Contribution & Déploiement
