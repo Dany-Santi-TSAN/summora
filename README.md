@@ -1,8 +1,11 @@
 # 🎯 Summora V3
 **Speech In, Sense Out**
+
 **Analyse intelligente de meeting et reporting automatisé**
 
-## 🎯 Projet Personnel - Démonstration de Compétences
+*Summora transforme chaque réunion en un livrable clair et actionnable grâce à un pipeline LLM modulaire et robuste, optimisé pour le traitement audio et l’analyse métier.*
+
+## 🎯 Projet Personnel - Démonstration technique
 
 **Objectif** : Développer mes compétences en LLM Engineering et NLP appliqué à l'analyse de réunions, en abordant le projet comme un vrai produit avec une architecture scalable.
 
@@ -11,15 +14,14 @@
 ⚠️ Note importante : Projet développé avec des données publiques uniquement. Pas de déploiement en production pour des raisons de conformité RGPD (protection des données de réunions d'entreprise).
 
 
-Summora transforme chaque réunion en un livrable clair et actionnable grâce à un pipeline LLM modulaire et robuste, optimisé pour le traitement audio et l’analyse métier.
+## 🚀 Architecture technique
 
-🚀 Architecture technique
 🎙️ Audio → Whisper + Audio Analysis → YAKE + LLM → 3-Level Cascade → 📊 Insights
                                         ↓                    ↓                           ↓
                              Transcription +     Détection NLP       [Premium] → [Gratuit] → [Local]
                       Qualité / Énergie / Rythme
 
-🔧 Personnalisation métier
+## 🔧 Personnalisation métier
 
 Prompts centralisés : src/config/llm_config.py
 
@@ -27,24 +29,25 @@ Vocabulaire métier : stopwords et termes spécifiques → src/core
 
 RAG enrichi : intégration de documents internes pour refléter la culture d’entreprise → src/rag/rag_documents
 
-📂 Préparation des données
+## 📂 Préparation des données
 
 Créer un dossier data à la racine pour y déposer vos fichiers audio :
 
 mkdir data
 
-🔑 Configuration
+## 🔑 Configuration
 
-⚙️ Setup rapide (démonstration locale)
-# Création environnement virtuel
+## ⚙️ Setup rapide (démonstration locale)
+
+### Création environnement virtuel
 python -m venv venv
 source venv/bin/activate   # Linux/Mac
 venv\Scripts\activate      # Windows
 
-# Installation dépendances
+### Installation dépendances
 pip install -r requirements.txt
 
-# Variables d'environnement (API keys)
+### Variables d'environnement (API keys)
 
 Créer un fichier .env :
 
@@ -53,23 +56,29 @@ echo "OPENROUTER_API_KEY=xxx" >> .env
 echo "HF_TOKEN=xxx" >> .env
 cat .env
 
-▶️ Usage
+## ▶️ Usage
+
 Exécution complète
+
 python scripts/main.py --model medium --full data/audio.mp3
 
 Modules spécifiques
+
 python scripts/main_extract.py      # Extraction thèmes & actions
+
 python scripts/main_reco.py         # Recommandations & insights
+
 python scripts/main_corrector.py    # Correcteur LLM
 
-Déploiement app
-# Terminal 1
+
+## Déploiement app
+### Terminal 1
 python app/backend.py
 
-# Terminal 2
+### Terminal 2
 streamlit run app/ui_streamlit.py
 
-# Déploiement EC2 (AWS)
+## Déploiement EC2 (AWS)
 
 1) Créer un dossier keys/ à la racine et y placer votre key pair AWS.
 
@@ -79,7 +88,7 @@ streamlit run app/ui_streamlit.py
 
 📌 Ce projet est conçu comme démonstration portfolio : l’installation sert uniquement à tester le pipeline sur des données publiques.
 
-📊 Outputs
+## 📊 Outputs
 
 Arborescence des résultats :
 
