@@ -9,6 +9,8 @@
 
 ⚠️ Note importante : Projet développé avec des données publiques uniquement. Pas de déploiement en production pour des raisons de conformité RGPD (protection des données de réunions d'entreprise).
 
+
+
 ## 🏗️ Architecture Pipeline
 
 ### Vue d'ensemble
@@ -30,8 +32,7 @@ Pipeline en cascade avec 4 niveaux de robustesse :
 ```python
 1. 🚀 Qwen Enhanced (YAKE + LLM Premium)     → Qualité maximale
 2. 🆓 LLM Gratuit (Llama 3.2-3b)            → Backup fiable
-3. 🔧 Phi3 Mini Local (SLM + YAKE)          → Mode RGPD (lent)
-4. 📊 YAKE Fallback                         → Toujours fonctionne
+4. 📊 YAKE Fallback                         → Toujours fonctionnel
 ```
 
 **Extraction YAKE+LLM :**
@@ -45,7 +46,6 @@ Pipeline en cascade avec 4 niveaux de robustesse :
 - **Cascade intelligente** : Premium → Gratuit → Dictionnaire pré-codé
 
 #### 4. **Monitoring & Métriques**
-- **Coûts API** : Calcul précis via tokenizers (€/1M tokens)
 - **Performance** : RAM, GPU, temps d'exécution par étape
 - **Qualité** : BERTScore, confidence Whisper, densité business
 - **Rapports** : JSON détaillés pour analyse post-traitement
@@ -55,7 +55,7 @@ Pipeline en cascade avec 4 niveaux de robustesse :
 ### Prérequis
 - Python 3.10+
 - 16GB RAM recommandés (pour Whisper medium+)
-- GPU optionnel (accélération Whisper/Phi3)
+- GPU optionnel (accélération Whisper)
 
 ### Setup rapide
 ```bash
@@ -220,7 +220,7 @@ enable_spot_check: false     # QA aléatoire
 - **Whisper base** : ~30s pour 10min audio (CPU)
 - **Crash test audio 1h30 (medium)** : <5min pour 1h30h d'audio (GPU 16go VRAM)
 - **Extraction LLM** : ~5s via API, ~2h en local
-- **Memory usage** : ~2GB baseline, 8GB+ avec modèles large
+- **Memory usage** : ~2GB small, 8GB+ avec modèles large
 
 ## 📈 Roadmap
 
