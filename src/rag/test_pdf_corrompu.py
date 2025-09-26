@@ -4,7 +4,7 @@ incorrect startxref pointer(1)
 from pathlib import Path
 import pypdf
 
-docs_path = Path("data/rag/documents/")
+docs_path = Path("rag_documents/")
 
 for pdf_file in docs_path.glob("*.pdf"):
     print(f"\n🔍 Test {pdf_file.name}...")

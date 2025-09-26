@@ -10,6 +10,7 @@ __pycache__/
 data/
 output/
 *.json
+deploy_ec2/aws_deployment_guide_for_me.md
 
 # Clé
 keys/

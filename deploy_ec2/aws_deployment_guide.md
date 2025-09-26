@@ -1,23 +1,19 @@
-# Summora
-Speech in, sense out
-Anlayse intelligente de réunion
-
 ## AWS Console
 - Instance: g4dn.xlarge
 - AMI: Ubuntu 22.04 LTS
 - EBS : 50go gp2
-- Key: summora-keypair-190625
-- Security group: summora-security-group
-- id compte aws : 788922688762
-- id canonical : 04dd8c701a0859e4b9f1f1eb3a095014256b308718513e4de1e3cbe1a8218327
+- Key: votre_configuration_keypair
+- Security group: votre_configuration_security_group
+- id compte aws : votre_id_aws
+- id canonical : votre_id_canonical
 
 
 ## 🚀 Workflow optimal pour AWS
 
 ### Connexion + transfer
-ssh -i keys/summora-keypair-190625.pem ubuntu@[NOUVELLE_IP]
+ssh -i keys/[nom_key_pair].pem ubuntu@[NOUVELLE_IP]
 # Transfer setup + requirements en une fois
-scp -i keys/summora-keypair-190625.pem \
+scp -i keys/[nom_key_pair].pem \
     {deploy/deploy_summora_aws.sh,requirements.txt} \
     ubuntu@[NOUVELLE_IP]:~/
 
@@ -26,13 +22,13 @@ bash deploy_summora_aws.sh
 #### (reboot auto)
 
 ### Setup phase 2 (post reboot)
-ssh -i keys/summora-keypair-190625.pem ubuntu@[NOUVELLE_IP]
+ssh -i keys/[nom_key_pair].pem ubuntu@[NOUVELLE_IP]
 bash deploy_summora_aws.sh --post-reboot
 
 ## Test final
 
-### Transfer code + test
-scp -i keys/summora-keypair-190625.pem -r * ubuntu@[NOUVELLE_IP]:~/summora/
+### Transfer code + test (deuxième terminal)
+scp -i keys/[nom_key_pair].pem -r * ubuntu@[NOUVELLE_IP]:~/summora/
 
 ### Environnement
 source summora-env/bin/activate
@@ -47,8 +43,8 @@ echo "OPENROUTER_API_KEY=vjkj..." >> .env
 echo "HF_TOKEN=flkdjfkl..." >> .env
 cat .env
 
-# Récupérer tous les fichiers du dossier ~/summora de l'instance
-scp -i keys/summora-keypair-190625.pem -r ubuntu@[NOUVELLE_IP]:~/summora/* ./output/
+# Récupérer tous les fichiers du dossier ~/summora de l'instance (deuxième terminal)
+scp -i keys/[nom_key_pair].pem -r ubuntu@[NOUVELLE_IP]:~/summora/* ./output/
 
 ### Penser à résilier l'instance
 

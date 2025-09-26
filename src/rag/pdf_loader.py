@@ -1,6 +1,6 @@
 """
 Chargement des pdf
-data/rag/documents
+rag_documents
 """
 import logging
 from pathlib import Path
