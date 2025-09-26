@@ -11,23 +11,23 @@
 
 **Contexte** : Solution pour automatiser la synthèse de réunions (transcription, résumé, recommandations) en réponse au problème concret de managers perdant ~2h/semaine en rédaction de comptes rendus.
 
-⚠️ Note importante : Projet développé avec des données publiques uniquement. Pas de déploiement en production pour des raisons de conformité RGPD (protection des données de réunions d'entreprise).
+⚠️ **Note importante** : Projet développé avec des données publiques uniquement. Pas de déploiement en production pour des raisons de conformité RGPD (protection des données de réunions d'entreprise).
 
 
 ## 🚀 Architecture technique
 
-🎙️ Audio → Whisper + Audio Analysis → YAKE + LLM → 3-Level Cascade → 📊 Insights
-                                        ↓                    ↓                           ↓
-                             Transcription +     Détection NLP       [Premium] → [Gratuit] → [Local]
-                      Qualité / Énergie / Rythme
+| Étape Audio                          | NLP        | Cascade LLM                     | Insights                                                   |
+| ------------------------------------ | ---------- | ------------------------------- | ---------------------------------------------------------- |
+| 🎙️ Audio → Whisper + Audio Analysis | YAKE + LLM | [Premium] → [Gratuit] → [Local] | Transcription + Détection NLP + Qualité / Énergie / Rythme |
+
 
 ## 🔧 Personnalisation métier
 
-Prompts centralisés : src/config/llm_config.py
+**Prompts centralisés** : src/config/llm_config.py
 
-Vocabulaire métier : stopwords et termes spécifiques → src/core
+**Vocabulaire métier** : stopwords et termes spécifiques → src/core
 
-RAG enrichi : intégration de documents internes pour refléter la culture d’entreprise → src/rag/rag_documents
+**RAG enrichi** : intégration de documents internes pour refléter la culture d’entreprise → src/rag/rag_documents
 
 ## 📂 Préparation des données
 
@@ -41,7 +41,9 @@ mkdir data
 
 ### Création environnement virtuel
 python -m venv venv
+
 source venv/bin/activate   # Linux/Mac
+
 venv\Scripts\activate      # Windows
 
 ### Installation dépendances
@@ -52,17 +54,20 @@ pip install -r requirements.txt
 Créer un fichier .env :
 
 touch .env
+
 echo "OPENROUTER_API_KEY=xxx" >> .env
+
 echo "HF_TOKEN=xxx" >> .env
+
 cat .env
 
 ## ▶️ Usage
 
-Exécution complète
+**Exécution complète**
 
 python scripts/main.py --model medium --full data/audio.mp3
 
-Modules spécifiques
+**Modules spécifiques**
 
 python scripts/main_extract.py      # Extraction thèmes & actions
 
@@ -93,10 +98,15 @@ streamlit run app/ui_streamlit.py
 Arborescence des résultats :
 
 output/
+
 ├── transcriptions/     # Fichiers .txt + JSON métadonnées
+
 ├── extractions/        # Topics, actions, décisions (JSON)
+
 ├── recommendations/    # Conseils d'amélioration (JSON)
+
 ├── audio_analysis/     # Qualité audio, spectrogrammes
+
 └── reports/            # Métriques complètes, monitoring
 
 
@@ -120,6 +130,7 @@ output/
   }
 }
 
+
 ## 🤝 Contribution & Déploiement
 
 Ce projet est un portfolio technique conçu pour démontrer :
@@ -136,4 +147,4 @@ La **scalabilité cloud** avec un guide de déploiement sur AWS EC2 GPU (dossier
 Projet personnel – Démonstration technique
 ⚠️ Non destiné à un usage commercial sans audit RGPD complet
 
-*avec la contribution de 3 managers pour leur précieux feedback*
+*Merci pour la contribution des 3 managers pour leur précieux feedback*
