@@ -110,7 +110,7 @@ output/
 └── reports/            # Métriques complètes, monitoring
 
 
-### Exemple d’extraction :
+### Exemple d’extraction (json):
 
 | Catégorie             | Détails                                                                                                                |
 | --------------------- | ---------------------------------------------------------------------------------------------------------------------- |
